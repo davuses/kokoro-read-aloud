@@ -5,10 +5,6 @@ from kokoro import KModel, KPipeline
 
 # Suppress all warnings
 warnings.filterwarnings("ignore")
-import requests
-
-r = requests.get("https://www.google.com", timeout=5)
-r.raise_for_status()  # Ensure the request was successful
 
 
 def adjust_volume(audio: np.ndarray, gain: float) -> np.ndarray:
