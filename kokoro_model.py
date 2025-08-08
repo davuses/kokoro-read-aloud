@@ -5,6 +5,10 @@ from kokoro import KModel, KPipeline
 
 # Suppress all warnings
 warnings.filterwarnings("ignore")
+import requests
+
+r = requests.get("https://www.google.com", timeout=5)
+r.raise_for_status()  # Ensure the request was successful
 
 
 def adjust_volume(audio: np.ndarray, gain: float) -> np.ndarray:
@@ -17,7 +21,19 @@ def adjust_volume(audio: np.ndarray, gain: float) -> np.ndarray:
 
 
 class KokoroModel:
-    def __init__(self, lang_code="a", voice="am_michael.pt"):
+    ALLOWED_VOICES = [
+        "af_bella",
+        "af_heart",
+        "af_sarah",
+        "af_sky",
+        "am_echo",
+        "am_liam",
+        "am_michael",
+        "bf_alice",
+        "bf_lily",
+    ]
+
+    def __init__(self, lang_code="a"):
         # Initialize the TTS pipeline (only once)
         kmodel = KModel(
             config="model_config.json",
@@ -30,12 +46,14 @@ class KokoroModel:
             model=kmodel,
             device="cuda",
         )
-        self.voice = voice
 
-    def generate_audio(self, text, speed=1, split_pattern=r"\n+"):
-        # Generate the audio based on the given text
+    def generate_audio(
+        self, text: str, voice: str, speed=1, split_pattern=r"\n+"
+    ):
+        if voice not in self.ALLOWED_VOICES:
+            voice = self.ALLOWED_VOICES[0]
         generator = self.pipeline(
-            text, voice=self.voice, speed=speed, split_pattern=split_pattern
+            text, voice=voice, speed=speed, split_pattern=split_pattern
         )
 
         # Accumulate all audio chunks in a list

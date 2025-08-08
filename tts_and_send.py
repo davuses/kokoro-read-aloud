@@ -1,4 +1,5 @@
 import asyncio
+import os
 import pathlib
 import re
 import subprocess
@@ -13,7 +14,10 @@ for wav_file in pathlib.Path("audio_output").glob("*.wav"):
     wav_file.unlink()
 
 text = open("text.txt").read()
-generator = pipeline(text, voice="am_michael", speed=1, split_pattern=r"\n+")
+generator = pipeline(text, voice="am_echo", speed=1, split_pattern=r"\n+")
+
+
+os.makedirs("./audio_output", exist_ok=True)
 
 for i, (gs, ps, audio) in tqdm(enumerate(generator)):
     sf.write(f"audio_output/{i}.wav", audio, 24000)  # save each audio file

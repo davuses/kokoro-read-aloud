@@ -30,11 +30,13 @@ app.add_middleware(
 
 class TextRequest(BaseModel):
     text: str
+    voice: str
 
 
 @app.post("/tts")
 async def tts(request: TextRequest):
     text = request.text
+    voice = request.voice
 
     if not text:
         raise HTTPException(status_code=400, detail="No text provided")
@@ -42,7 +44,7 @@ async def tts(request: TextRequest):
         logger.info("Loading GPU model...")
         from kokoro_model import kokoro_model
 
-        audio_output = kokoro_model.generate_audio(text)  # type: ignore
+        audio_output = kokoro_model.generate_audio(text, voice=voice)
         audio_io_wav = io.BytesIO()
         sf.write(audio_io_wav, audio_output, 24000, format="WAV")
         audio_io_wav.seek(0)
