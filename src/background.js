@@ -87,12 +87,6 @@ async function handleTTS(selectedText, tabId) {
       }
     } else {
       switch (ttsEngine) {
-        case "edge":
-          api.tabs.sendMessage(tabId, {
-            action: "tts_edge",
-            text: selectedText,
-          });
-          break;
         case "google-translate":
           api.tabs.sendMessage(tabId, {
             action: "tts_google_translate",

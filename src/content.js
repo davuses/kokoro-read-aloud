@@ -27,14 +27,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else {
       console.error("No audio data received");
     }
-  } else if (message.action === "tts_edge") {
-    const text = message.text;
-    generateAudio(text, "en-US-AndrewNeural", { pitch: 0, rate: 0 }).then(
-      (url) => {
-        const audioURL = url;
-        createAudioPlayer(audioURL);
-      }
-    );
   } else if (message.action === "tts_google_translate") {
     const text = message.text;
     const audioURL = `https://www.google.com/speech-api/v1/synthesize?text=${text}&enc=mpeg&lang=en-us&speed=0.45&client=lr-language-tts&use_google_only_voices=1`;

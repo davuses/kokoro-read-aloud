@@ -1,12 +1,11 @@
 document.addEventListener("DOMContentLoaded", () => {
   const ttsSelect = document.getElementById("tts-select");
 
-  // Load the current TTS option from localStorage or default to 'edge-tts'
   chrome.storage.sync.get("ttsEngine", (data) => {
     if (data.ttsEngine) {
       ttsSelect.value = data.ttsEngine;
     } else {
-      ttsSelect.value = "tts-edge"; // Default value
+      ttsSelect.value = "google-translate";
     }
   });
 
