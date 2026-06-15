@@ -155,17 +155,50 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     }
   });
 
+  // Progress bar
+  const progressTrack = document.createElement("div");
+  progressTrack.style.width = "140px";
+  progressTrack.style.height = "6px";
+  progressTrack.style.backgroundColor = "rgba(255,255,255,0.3)";
+  progressTrack.style.borderRadius = "3px";
+  progressTrack.style.cursor = "pointer";
+  progressTrack.style.marginRight = "6px";
+  progressTrack.style.flexShrink = "0";
+  progressTrack.style.position = "relative";
+
+  const progressFill = document.createElement("div");
+  progressFill.style.width = "0%";
+  progressFill.style.height = "100%";
+  progressFill.style.backgroundColor = "#3498db";
+  progressFill.style.borderRadius = "3px";
+  progressFill.style.pointerEvents = "none";
+  progressTrack.appendChild(progressFill);
+
+  progressTrack.addEventListener("click", (e) => {
+    const rect = progressTrack.getBoundingClientRect();
+    const fraction = (e.clientX - rect.left) / rect.width;
+    const seekTo = fraction * duration;
+    if (isPlaying) source.stop();
+    isPlaying = false;
+    pauseOffset = seekTo;
+    startSource(seekTo);
+    ended = false;
+    updatePlayButton();
+  });
+
   // Time display
   const timeDisplay = document.createElement("span");
   timeDisplay.style.color = "white";
   timeDisplay.style.fontFamily = "sans-serif";
   timeDisplay.style.fontSize = "13px";
   timeDisplay.style.marginRight = "8px";
-  timeDisplay.style.minWidth = "90px";
+  timeDisplay.style.minWidth = "80px";
   timeDisplay.style.display = "inline-block";
 
   function updateTime() {
-    timeDisplay.textContent = `${formatTime(getElapsed())} / ${formatTime(duration)}`;
+    const elapsed = getElapsed();
+    timeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(duration)}`;
+    progressFill.style.width = `${(elapsed / duration) * 100}%`;
   }
 
   // Close button
@@ -181,6 +214,7 @@ async function createAudioPlayer(base64Audio, gainIndex) {
 
   audioContainer.appendChild(delayPlayButton);
   audioContainer.appendChild(playPauseBtn);
+  audioContainer.appendChild(progressTrack);
   audioContainer.appendChild(timeDisplay);
   audioContainer.appendChild(closeButton);
 
