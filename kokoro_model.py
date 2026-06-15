@@ -3,25 +3,37 @@ import time
 import warnings
 
 import numpy as np
-from kokoro import KPipeline
 
 # Suppress all warnings
 warnings.filterwarnings("ignore")
 
-logging.basicConfig(level=logging.INFO)  # noqa: F821
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Native sample rate of the Kokoro model output.
+SAMPLE_RATE = 24000
+# Volume boost applied to the raw model output. Values above the [-1, 1]
+# range are soft-limited (see adjust_volume), so a higher gain increases
+# perceived loudness instead of just clipping.
+VOLUME_GAIN = 6.0
 
 
 def adjust_volume(audio: np.ndarray, gain: float) -> np.ndarray:
-    """Adjust audio volume by a gain factor, avoid clipping."""
-    audio = audio * gain
-    max_val = np.max(np.abs(audio))
-    if max_val > 1.0:
-        audio = audio / max_val
-    return audio
+    """Boost volume by ``gain``, soft-limiting peaks to avoid hard clipping.
+
+    A plain multiply-then-normalize would peak-normalize every clip back to
+    1.0, cancelling out any gain increase. Instead we apply the gain and pass
+    the result through ``tanh``, which is near-linear for quiet samples and
+    saturates smoothly toward +/-1 for loud ones. This makes the audio
+    genuinely louder as ``gain`` rises, with gentle saturation rather than
+    abrupt clipping.
+    """
+    return np.tanh(audio * gain).astype(np.float32)
 
 
 class KokoroModel:
+    # American English voices only (lang_code "a"). British voices would
+    # need a pipeline built with lang_code "b", so they are not offered here.
     ALLOWED_VOICES = [
         "af_bella",
         "af_heart",
@@ -30,27 +42,33 @@ class KokoroModel:
         "am_echo",
         "am_liam",
         "am_michael",
-        "bf_alice",
-        "bf_lily",
     ]
 
     def __init__(self, lang_code="a"):
-        # Initialize the TTS pipeline (only once)
-        import torch
+        self.lang_code = lang_code
+        # The pipeline (and the heavy torch/kokoro imports it needs) is loaded
+        # lazily on the first generate_audio call, not at import/startup.
+        self.pipeline = None
 
-        if torch.cuda.is_available():
-            logger.info("GPU found, loading model on GPU")
-        self.pipeline = KPipeline(
-            lang_code=lang_code
-        )  # make sure lang_code matches voice
+    def _ensure_pipeline(self):
+        if self.pipeline is None:
+            import torch
+            from kokoro import KPipeline
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info("Loading model on %s", device)
+            self.pipeline = KPipeline(
+                lang_code=self.lang_code, device=device
+            )  # make sure lang_code matches voice
+        return self.pipeline
 
     def generate_audio(
         self, text: str, voice: str, speed=1, split_pattern=r"\n+"
     ):
         if voice not in self.ALLOWED_VOICES:
-            voice = self.ALLOWED_VOICES[0]
-
-        generator = self.pipeline(
+            raise ValueError(f"Unknown voice: {voice!r}")
+        pipeline = self._ensure_pipeline()
+        generator = pipeline(
             text, voice=voice, speed=speed, split_pattern=split_pattern
         )
         # Accumulate all audio chunks in a list
@@ -65,7 +83,7 @@ class KokoroModel:
             audio_output = np.concatenate(audio_chunks)
         else:
             raise ValueError("Failed to generate audio")
-        audio_output = adjust_volume(audio_output, 3)
+        audio_output = adjust_volume(audio_output, VOLUME_GAIN)
         return audio_output
 
 
