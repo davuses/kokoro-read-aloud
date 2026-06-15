@@ -40,4 +40,25 @@
     outline: none;
     box-shadow: 0 0 5px rgba(231, 76, 60, 0.8);
   }
-  
+
+  #clear-all-audio-button {
+    position: fixed;
+    bottom: 6px;
+    padding: 7px;
+    background-color: rgba(196, 59, 59, 0.25);
+    color: white;
+    border: none;
+    border-radius: 26px;
+    cursor: pointer;
+    z-index: 10000;
+    font-size: 22px;
+    transition: background-color 0.2s ease;
+  }
+
+  #clear-all-audio-button:hover {
+    background-color: rgba(196, 59, 59, 0.55);
+  }
+
+  #clear-all-audio-button:active {
+    background-color: rgba(196, 59, 59, 0.8);
+  }

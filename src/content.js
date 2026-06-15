@@ -46,6 +46,7 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   let pauseOffset = 0;
   let isPlaying = false;
   let ended = false;
+  let isDragging = false;
 
   function getElapsed() {
     if (!isPlaying) return pauseOffset;
@@ -58,14 +59,24 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   }
 
   function startSource(offset) {
-    source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(gainNode);
-    source.start(0, offset);
+    const thisSource = audioCtx.createBufferSource();
+    thisSource.buffer = audioBuffer;
+    thisSource.connect(gainNode);
+    thisSource.start(0, offset);
     startedAt = audioCtx.currentTime - offset;
     isPlaying = true;
-    source.onended = () => {
-      if (isPlaying) {
+    source = thisSource;
+
+    // Per-source flag: distinguishes manual stop (pause/seek) from natural end.
+    // onended fires in both cases, but only natural end should mark the audio done.
+    let stoppedManually = false;
+    thisSource._stopManually = () => {
+      stoppedManually = true;
+      thisSource.stop();
+    };
+
+    thisSource.onended = () => {
+      if (source === thisSource && !stoppedManually) {
         isPlaying = false;
         ended = true;
         pauseOffset = 0;
@@ -80,19 +91,12 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     clearAllButton = document.createElement("button");
     clearAllButton.id = "clear-all-audio-button";
     clearAllButton.textContent = "🧹";
-    clearAllButton.style.position = "fixed";
-    clearAllButton.style.bottom = "6px";
-    clearAllButton.style.right = "470px";
-    clearAllButton.style.padding = "7px";
-    clearAllButton.style.backgroundColor = "rgb(196 59 59 / 16%)";
-    clearAllButton.style.color = "white";
-    clearAllButton.style.border = "none";
-    clearAllButton.style.borderRadius = "26px";
-    clearAllButton.style.cursor = "pointer";
-    clearAllButton.style.zIndex = "10000";
-    clearAllButton.style.fontSize = "22px";
+    clearAllButton.title = "Clear all";
     clearAllButton.addEventListener("click", () => {
-      document.querySelectorAll(".audio-player-container").forEach((el) => el.remove());
+      document.querySelectorAll(".audio-player-container").forEach((el) => {
+        if (el._cleanup) el._cleanup();
+        el.remove();
+      });
       clearAllButton.style.display = "none";
     });
     document.body.appendChild(clearAllButton);
@@ -144,7 +148,7 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   playPauseBtn.addEventListener("click", () => {
     if (isPlaying) {
       pauseOffset = getElapsed();
-      source.stop();
+      source._stopManually();
       isPlaying = false;
       updatePlayButton();
     } else {
@@ -174,16 +178,39 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   progressFill.style.pointerEvents = "none";
   progressTrack.appendChild(progressFill);
 
-  progressTrack.addEventListener("click", (e) => {
+  function getFraction(e) {
     const rect = progressTrack.getBoundingClientRect();
-    const fraction = (e.clientX - rect.left) / rect.width;
+    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  }
+
+  function seekToFraction(fraction) {
     const seekTo = fraction * duration;
-    if (isPlaying) source.stop();
+    if (isPlaying) source._stopManually();
     isPlaying = false;
     pauseOffset = seekTo;
     startSource(seekTo);
     ended = false;
     updatePlayButton();
+  }
+
+  progressTrack.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    isDragging = true;
+    progressFill.style.width = `${getFraction(e) * 100}%`;
+
+    const onMouseMove = (e) => {
+      progressFill.style.width = `${getFraction(e) * 100}%`;
+    };
+
+    const onMouseUp = (e) => {
+      isDragging = false;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      seekToFraction(getFraction(e));
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
   });
 
   // Time display
@@ -198,7 +225,10 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   function updateTime() {
     const elapsed = getElapsed();
     timeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(duration)}`;
-    progressFill.style.width = `${(elapsed / duration) * 100}%`;
+    // Don't overwrite fill position while user is dragging
+    if (!isDragging) {
+      progressFill.style.width = `${(elapsed / duration) * 100}%`;
+    }
   }
 
   // Close button
@@ -206,8 +236,7 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   closeButton.innerHTML = "&times;";
   closeButton.classList.add("close-button");
   closeButton.addEventListener("click", () => {
-    if (source && isPlaying) source.stop();
-    audioCtx.close();
+    audioContainer._cleanup();
     audioContainer.remove();
     adjustAudioPositions();
   });
@@ -224,6 +253,9 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   audioContainer.style.bottom = `${baseBottom + existingPlayers.length * spacing}px`;
   audioContainer.style.right = "10px";
   document.body.appendChild(audioContainer);
+
+  // Position clear-all button to the left of the player stack based on actual width
+  clearAllButton.style.right = `${10 + audioContainer.offsetWidth + 8}px`;
 
   // Auto-play if no other media is playing
   const otherMediaPlaying = Array.from(document.querySelectorAll("audio, video"))
@@ -245,19 +277,20 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     }
   }, 250);
 
-  // Clean up timer if container is removed externally (e.g. clear-all button)
-  new MutationObserver((_, obs) => {
-    if (!document.contains(audioContainer)) {
-      clearInterval(timer);
-      if (source && isPlaying) source.stop();
-      audioCtx.close();
-      obs.disconnect();
-    }
-  }).observe(document.body, { childList: true, subtree: true });
+  // Store cleanup on the element so the clear-all button can call it
+  // without needing a MutationObserver watching the entire page DOM.
+  audioContainer._cleanup = () => {
+    clearInterval(timer);
+    if (source && isPlaying) source.stop();
+    audioCtx.close();
+  };
 
   function adjustAudioPositions() {
-    document.querySelectorAll(".audio-player-container").forEach((player, index) => {
+    const players = document.querySelectorAll(".audio-player-container");
+    players.forEach((player, index) => {
       player.style.bottom = `${baseBottom + index * spacing}px`;
     });
+    const btn = document.querySelector("#clear-all-audio-button");
+    if (btn) btn.style.display = players.length > 0 ? "block" : "none";
   }
 }
