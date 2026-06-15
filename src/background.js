@@ -26,7 +26,10 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
 async function handleTTS(selectedText, tabId) {
   api.storage.sync.get("ttsEngine", async (data) => {
     const ttsEngine = data.ttsEngine || "google-translate";
-    if (ttsEngine.startsWith("kokoro")) {
+    if (ttsEngine.startsWith("kokoro") || ttsEngine.startsWith("edge")) {
+      // ttsEngine looks like "kokoro_af_bella" or "edge_en-US-AvaNeural":
+      // the prefix is the server engine, the rest is the voice name.
+      const engine = ttsEngine.startsWith("edge") ? "edge" : "kokoro";
       const voice = ttsEngine.split("_").slice(1).join("_");
 
       try {
@@ -36,7 +39,7 @@ async function handleTTS(selectedText, tabId) {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ text: selectedText, voice: voice }),
+          body: JSON.stringify({ text: selectedText, voice: voice, engine: engine }),
         });
 
         if (!response.ok) {
