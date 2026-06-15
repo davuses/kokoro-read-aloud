@@ -85,14 +85,28 @@ async function handleTTS(selectedText, tabId) {
           message: `Error playing TTS audio:, ${error}. Please make sure the server is running at port 18001`,
         });
       }
-    } else {
-      switch (ttsEngine) {
-        case "google-translate":
+    } else if (ttsEngine === "google-translate") {
+      const gtUrl = `https://www.google.com/speech-api/v1/synthesize?text=${encodeURIComponent(selectedText)}&enc=mpeg&lang=en-us&speed=0.45&client=lr-language-tts&use_google_only_voices=1`;
+      try {
+        const response = await fetch(gtUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const audioBlob = await response.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64Audio = reader.result.split(",")[1];
           api.tabs.sendMessage(tabId, {
             action: "tts_google_translate",
-            text: selectedText,
+            audioBase64: base64Audio,
           });
-          break;
+        };
+        reader.readAsDataURL(audioBlob);
+      } catch (error) {
+        api.notifications.create({
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: "TTS Error",
+          message: `Google Translate TTS failed: ${error.message}`,
+        });
       }
     }
   });
