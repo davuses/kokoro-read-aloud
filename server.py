@@ -1,10 +1,14 @@
 import asyncio
+import base64
 import io
+import json
 import logging
 import os
+import threading
 
+import numpy as np
 import soundfile as sf
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -59,9 +63,6 @@ def _synthesize(text: str, voice: str) -> bytes:
 class TextRequest(BaseModel):
     text: str
     voice: str
-    # "kokoro" (local GPU model) or "edge" (Microsoft Edge online TTS).
-    # Defaults to kokoro so existing clients keep working unchanged.
-    engine: str = "kokoro"
 
 
 async def _tts_kokoro(text: str, voice: str) -> bytes:
@@ -72,7 +73,7 @@ async def _tts_kokoro(text: str, voice: str) -> bytes:
     if voice not in kokoro_model.ALLOWED_VOICES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown kokoro voice. Allowed: {kokoro_model.ALLOWED_VOICES}",
+            detail=f"Unknown voice. Allowed: {kokoro_model.ALLOWED_VOICES}",
         )
 
     # Kokoro uses one shared GPU pipeline: serialize with the lock and run the
@@ -81,36 +82,90 @@ async def _tts_kokoro(text: str, voice: str) -> bytes:
         return await run_in_threadpool(_synthesize, text, voice)
 
 
-async def _tts_edge(text: str, voice: str) -> bytes:
-    import edge_model
-
-    if voice not in edge_model.ALLOWED_VOICES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown edge voice. Allowed: {edge_model.ALLOWED_VOICES}",
-        )
-
-    # Edge is async network I/O and returns MP3 directly; no lock needed.
-    return await edge_model.generate_mp3(text, voice)
-
-
 @app.post("/tts")
 async def tts(request: TextRequest):
-    text = request.text
-    voice = request.voice
-    engine = request.engine
-
-    if not text:
+    if not request.text:
         raise HTTPException(status_code=400, detail="No text provided")
 
-    if engine == "kokoro":
-        mp3_bytes = await _tts_kokoro(text, voice)
-    elif engine == "edge":
-        mp3_bytes = await _tts_edge(text, voice)
-    else:
+    mp3_bytes = await _tts_kokoro(request.text, request.voice)
+    return StreamingResponse(io.BytesIO(mp3_bytes), media_type="audio/mp3")
+
+
+@app.post("/tts/stream")
+async def tts_stream(body: TextRequest, request: Request):
+    """Stream Kokoro audio as it is generated, one NDJSON line per chunk.
+
+    Each line is a JSON object:
+      {"sr": 24000, "index": i, "pcm_b64": "<base64 Int16 mono PCM>"}
+    terminated by {"done": true}, or {"error": "..."} if generation fails
+    mid-stream (the HTTP status is already 200 by then, so failures are
+    reported in-band).
+    """
+    from kokoro_model import SAMPLE_RATE, kokoro_model
+
+    if not body.text:
+        raise HTTPException(status_code=400, detail="No text provided")
+    if body.voice not in kokoro_model.ALLOWED_VOICES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown engine: {engine!r}. Allowed: 'kokoro', 'edge'.",
+            detail=f"Unknown voice. Allowed: {kokoro_model.ALLOWED_VOICES}",
         )
 
-    return StreamingResponse(io.BytesIO(mp3_bytes), media_type="audio/mp3")
+    async def ndjson():
+        # Hold the GPU lock for the whole stream. Generation runs ~20x faster
+        # than playback, so the producer races ahead, drains into the queue,
+        # and the lock is released long before the client finishes playing.
+        async with _inference_lock:
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue = asyncio.Queue()
+            cancel = threading.Event()
+            DONE = object()
+
+            def produce():
+                try:
+                    for chunk in kokoro_model.stream_audio(body.text, body.voice):
+                        if cancel.is_set():
+                            break
+                        loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                    loop.call_soon_threadsafe(queue.put_nowait, DONE)
+                except Exception as exc:  # surfaced as an in-band error line
+                    logger.exception("Kokoro streaming generation failed")
+                    loop.call_soon_threadsafe(queue.put_nowait, exc)
+
+            fut = loop.run_in_executor(None, produce)
+            index = 0
+            try:
+                while True:
+                    # Stop generating if the client went away (closed player).
+                    if await request.is_disconnected():
+                        break
+                    item = await queue.get()
+                    if item is DONE:
+                        yield json.dumps({"done": True}) + "\n"
+                        break
+                    if isinstance(item, Exception):
+                        yield json.dumps({"error": str(item)}) + "\n"
+                        break
+                    pcm16 = (np.clip(item, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+                    yield json.dumps(
+                        {
+                            "sr": SAMPLE_RATE,
+                            "index": index,
+                            "pcm_b64": base64.b64encode(pcm16).decode("ascii"),
+                        }
+                    ) + "\n"
+                    index += 1
+            finally:
+                # Signal the worker to stop and wait for it to actually exit
+                # before releasing the lock, so the next request can't start GPU
+                # work while this generation is still finishing its last chunk.
+                # Loop through cancellation: if this coroutine is itself being
+                # cancelled, keep waiting until the worker thread is really done.
+                cancel.set()
+                while not fut.done():
+                    try:
+                        await asyncio.shield(fut)
+                    except asyncio.CancelledError:
+                        pass
+
+    return StreamingResponse(ndjson(), media_type="application/x-ndjson")

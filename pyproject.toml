@@ -5,7 +5,6 @@ description = "FastAPI server exposing the Kokoro text-to-speech model over an H
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "edge-tts>=7.2.8",
     "fastapi>=0.116.1",
     "kokoro>=0.9.4",
     "numpy<2.0",

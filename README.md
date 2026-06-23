@@ -39,22 +39,14 @@ response is noticeably slower than the ones that follow.
 Request body:
 
 ```json
-{ "text": "Hello from Kokoro", "voice": "af_bella", "engine": "kokoro" }
+{ "text": "Hello from Kokoro", "voice": "af_bella" }
 ```
 
-`engine` is optional and defaults to `"kokoro"`. Response: an `audio/mp3`
-stream. An empty `text`, an unknown `voice`, or an unknown `engine` returns
+Response: an `audio/mp3` stream. An empty `text` or an unknown `voice` returns
 `400`.
 
-**Engines and voices:**
-
-- `kokoro` (local GPU model) — `af_bella`, `af_heart`, `af_sarah`, `af_sky`,
-  `am_echo`, `am_liam`, `am_michael`.
-- `edge` ([Microsoft Edge online TTS](https://github.com/rany2/edge-tts),
-  requires internet) — `en-US-AvaNeural`, `en-US-AndrewNeural`,
-  `en-US-EmmaNeural`, `en-US-BrianNeural`, `en-US-JennyNeural`,
-  `en-US-GuyNeural`, `en-US-AriaNeural`, `en-US-MichelleNeural`. The full
-  catalogue is available via `edge_tts.list_voices()`.
+Available voices: `af_bella`, `af_heart`, `af_sarah`, `af_sky`, `am_echo`,
+`am_liam`, `am_michael`.
 
 Example:
 
@@ -63,12 +55,14 @@ curl -X POST http://localhost:18001/tts \
   -H "Content-Type: application/json" \
   -d '{"text": "Hello from Kokoro", "voice": "af_bella"}' \
   --output out.mp3
-
-curl -X POST http://localhost:18001/tts \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Hello from Edge", "voice": "en-US-AvaNeural", "engine": "edge"}' \
-  --output edge.mp3
 ```
+
+### `POST /tts/stream`
+
+Same request body as `/tts`. Streams audio as it is generated for low-latency
+playback of long text: an `application/x-ndjson` response with one JSON line
+per chunk — `{"sr": 24000, "index": i, "pcm_b64": "<base64 Int16 mono PCM>"}` —
+terminated by `{"done": true}`, or `{"error": "..."}` on mid-stream failure.
 
 ## Configuration
 

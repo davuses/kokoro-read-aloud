@@ -62,29 +62,38 @@ class KokoroModel:
             )  # make sure lang_code matches voice
         return self.pipeline
 
-    def generate_audio(
+    def stream_audio(
         self, text: str, voice: str, speed=1, split_pattern=r"\n+"
     ):
+        """Yield volume-adjusted float32 audio chunks as they are generated.
+
+        Kokoro's pipeline yields one chunk per <=510-token (sentence-grouped)
+        piece, so this starts producing audio after the first sentence rather
+        than the whole text. Used by the streaming endpoint.
+        """
         if voice not in self.ALLOWED_VOICES:
             raise ValueError(f"Unknown voice: {voice!r}")
         pipeline = self._ensure_pipeline()
         generator = pipeline(
             text, voice=voice, speed=speed, split_pattern=split_pattern
         )
-        # Accumulate all audio chunks in a list
-        audio_chunks = []
+        for _, _, audio in generator:
+            if audio is None:
+                continue
+            yield adjust_volume(np.asarray(audio, dtype=np.float32), VOLUME_GAIN)
+
+    def generate_audio(
+        self, text: str, voice: str, speed=1, split_pattern=r"\n+"
+    ):
         starttime = time.time()
-        for i, (gs, ps, audio) in enumerate(generator):
-            audio_chunks.append(audio)  # Add each audio chunk to the list
-        endtime = time.time()
-        logger.info(f"Time taken: {endtime - starttime:.2f} seconds")
-        # Concatenate all audio chunks into one array
-        if len(audio_chunks) > 0:
-            audio_output = np.concatenate(audio_chunks)
-        else:
+        # Reuse the streaming generator and concatenate for the buffered path.
+        audio_chunks = list(
+            self.stream_audio(text, voice, speed=speed, split_pattern=split_pattern)
+        )
+        logger.info(f"Time taken: {time.time() - starttime:.2f} seconds")
+        if not audio_chunks:
             raise ValueError("Failed to generate audio")
-        audio_output = adjust_volume(audio_output, VOLUME_GAIN)
-        return audio_output
+        return np.concatenate(audio_chunks)
 
 
 # Singleton instance of the model

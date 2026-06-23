@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/sakana/kokoro-tts-extension/**)",
+      "Bash(node --check src/content.js)",
+      "Bash(node build.js chrome)",
+      "Bash(node build.js firefox)",
+      "Bash(pkill -f \"uvicorn server:app --port 18009\")",
+      "Bash(uv remove *)",
+      "Bash(python -m py_compile server.py kokoro_model.py)",
+      "Bash(uv run *)",
+      "Bash(node --check src/background.js)",
+      "Bash(python -m py_compile server.py)",
+      "Bash(git commit *)"
+    ],
+    "additionalDirectories": [
+      "/home/sakana/kokoro-tts-extension/src",
+      "/home/sakana/kokoro-tts-extension/public"
+    ]
+  }
+}
