@@ -90,10 +90,10 @@ async def tts_stream(body: TextRequest, request: Request):
 
             def produce():
                 try:
-                    for chunk in kokoro_model.stream_audio(body.text, body.voice):
+                    for pair in kokoro_model.stream_audio(body.text, body.voice):
                         if cancel.is_set():
                             break
-                        loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                        loop.call_soon_threadsafe(queue.put_nowait, pair)
                     loop.call_soon_threadsafe(queue.put_nowait, DONE)
                 except Exception as exc:  # surfaced as an in-band error line
                     logger.exception("Kokoro streaming generation failed")
@@ -113,12 +113,14 @@ async def tts_stream(body: TextRequest, request: Request):
                     if isinstance(item, Exception):
                         yield json.dumps({"error": str(item)}) + "\n"
                         break
-                    pcm16 = (np.clip(item, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+                    text, audio = item
+                    pcm16 = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
                     yield json.dumps(
                         {
                             "sr": SAMPLE_RATE,
                             "index": index,
                             "pcm_b64": base64.b64encode(pcm16).decode("ascii"),
+                            "text": text,
                         }
                     ) + "\n"
                     index += 1

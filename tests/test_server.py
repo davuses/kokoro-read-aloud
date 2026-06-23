@@ -39,9 +39,10 @@ def test_stream_unknown_voice_returns_400():
 
 def test_stream_emits_ndjson_chunks_then_done(monkeypatch):
     # Two ~10ms chunks of silence; never touches torch/the real pipeline.
+    # stream_audio yields (text, audio) pairs.
     def fake_stream(text, voice, **kwargs):
-        for _ in range(2):
-            yield np.zeros(240, dtype=np.float32)
+        for i in range(2):
+            yield f"Sentence {i}.", np.zeros(240, dtype=np.float32)
 
     monkeypatch.setattr(
         kokoro_model.kokoro_model, "stream_audio", fake_stream
@@ -61,12 +62,13 @@ def test_stream_emits_ndjson_chunks_then_done(monkeypatch):
         assert chunk["sr"] == kokoro_model.SAMPLE_RATE
         assert chunk["index"] == i
         assert chunk["pcm_b64"]
+        assert chunk["text"] == f"Sentence {i}."
 
 
 def test_stream_reports_generation_error_in_band(monkeypatch):
     def boom(text, voice, **kwargs):
         raise RuntimeError("kaboom")
-        yield  # make it a generator
+        yield "", None  # make it a generator
 
     monkeypatch.setattr(kokoro_model.kokoro_model, "stream_audio", boom)
 

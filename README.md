@@ -64,9 +64,11 @@ Request body:
 
 Streams audio as it is generated for low-latency playback of long text: an
 `application/x-ndjson` response with one JSON line per chunk —
-`{"sr": 24000, "index": i, "pcm_b64": "<base64 Int16 mono PCM>"}` — terminated
-by `{"done": true}`, or `{"error": "..."}` on mid-stream failure. An empty
-`text` or an unknown `voice` returns `400`.
+`{"sr": 24000, "index": i, "pcm_b64": "<base64 Int16 mono PCM>", "text": "<the
+grapheme text of this chunk>"}` — terminated by `{"done": true}`, or
+`{"error": "..."}` on mid-stream failure. The `text` field lets a client align
+on-screen highlighting to the audio. An empty `text` or an unknown `voice`
+returns `400`.
 
 Available voices: `af_bella`, `af_heart`, `af_sarah`, `af_sky`, `am_echo`,
 `am_liam`, `am_michael`.

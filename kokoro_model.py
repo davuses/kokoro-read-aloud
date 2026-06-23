@@ -47,11 +47,13 @@ class KokoroModel:
     def stream_audio(
         self, text: str, voice: str, speed=1, split_pattern=r"\n+"
     ):
-        """Yield float32 audio chunks as they are generated.
+        """Yield ``(text, audio)`` pairs as they are generated.
 
         Kokoro's pipeline yields one chunk per <=510-token (sentence-grouped)
         piece, so this starts producing audio after the first sentence rather
-        than the whole text. Used by the streaming endpoint.
+        than the whole text. Each yield is the grapheme text of that chunk
+        paired with its float32 audio, so the client can align highlighting to
+        the audio. Used by the streaming endpoint.
         """
         if voice not in self.ALLOWED_VOICES:
             raise ValueError(f"Unknown voice: {voice!r}")
@@ -59,10 +61,10 @@ class KokoroModel:
         generator = pipeline(
             text, voice=voice, speed=speed, split_pattern=split_pattern
         )
-        for _, _, audio in generator:
+        for graphemes, _, audio in generator:
             if audio is None:
                 continue
-            yield np.asarray(audio, dtype=np.float32)
+            yield graphemes, np.asarray(audio, dtype=np.float32)
 
 
 # Singleton instance of the model
