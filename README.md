@@ -32,7 +32,27 @@ extension.
 The model is loaded lazily on the **first** request, so the first response is
 noticeably slower than the ones that follow.
 
+## Tests
+
+```bash
+uv run pytest
+```
+
+The tests mock the model, so they run without a GPU (or the Kokoro weights) in
+under a second.
+
 ## API
+
+### `GET /voices`
+
+Returns the list of allowed voices — the single source of truth, so clients can
+populate a dropdown instead of hardcoding the list:
+
+```json
+{ "voices": ["af_bella", "af_heart", "af_sarah", "af_sky", "am_echo", "am_liam", "am_michael"] }
+```
+
+Cheap to call: it does not load the model.
 
 ### `POST /tts/stream`
 

@@ -45,6 +45,19 @@ class TextRequest(BaseModel):
     voice: str
 
 
+@app.get("/voices")
+def voices():
+    """Return the list of allowed voices.
+
+    This is the single source of truth for the voice list (the model owns it);
+    the extension can fetch it to populate its dropdown instead of hardcoding.
+    Cheap to call — reading the class attribute does not load the model.
+    """
+    from kokoro_model import kokoro_model
+
+    return {"voices": kokoro_model.ALLOWED_VOICES}
+
+
 @app.post("/tts/stream")
 async def tts_stream(body: TextRequest, request: Request):
     """Stream Kokoro audio as it is generated, one NDJSON line per chunk.
