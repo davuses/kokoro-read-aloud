@@ -2,26 +2,24 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 
 document.addEventListener("DOMContentLoaded", () => {
   const ttsSelect = document.getElementById("tts-select");
-  const streamingToggle = document.getElementById("streaming-toggle");
 
   api.storage.sync.get("ttsEngine", (data) => {
     ttsSelect.value = data.ttsEngine || "google-translate";
     updateServerStatus();
   });
 
-  api.storage.sync.get(["playbackMode"], (r) => {
-    streamingToggle.checked = r.playbackMode === "streaming";
-  });
-
-  streamingToggle.addEventListener("change", () => {
-    api.storage.sync.set({
-      playbackMode: streamingToggle.checked ? "streaming" : "buffered",
-    });
-  });
-
   ttsSelect.addEventListener("change", () => {
     api.storage.sync.set({ ttsEngine: ttsSelect.value });
     updateServerStatus();
+  });
+
+  const pickBtn = document.getElementById("pick-element-btn");
+  pickBtn.addEventListener("click", async () => {
+    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id != null) {
+      api.tabs.sendMessage(tab.id, { action: "enterPickMode" });
+      window.close();
+    }
   });
 
   ttsSelect.addEventListener("wheel", (e) => {

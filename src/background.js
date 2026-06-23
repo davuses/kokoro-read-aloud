@@ -1,83 +1,48 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 const actionApi = api.action ?? api.browserAction;
 
-api.runtime.onInstalled.addListener(() => {
+function createMenus() {
   api.contextMenus.create({
     id: "ttsWithKokoro",
     title: "TTS with Kokoro",
     contexts: ["selection"],
   });
-});
+  api.contextMenus.create({
+    id: "ttsReadElement",
+    title: "Read an element aloud…",
+    contexts: ["page"],
+  });
+}
 
-api.runtime.onStartup.addListener(() => {
-  api.contextMenus.create({
-    id: "ttsWithKokoro",
-    title: "TTS with Kokoro",
-    contexts: ["selection"],
-  });
-});
+api.runtime.onInstalled.addListener(createMenus);
+api.runtime.onStartup.addListener(createMenus);
 
 api.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "ttsWithKokoro") {
     handleTTS(info.selectionText, tab.id);
+  } else if (info.menuItemId === "ttsReadElement") {
+    // Ask the page to enter element-picker mode; it sends back "tts_text".
+    api.tabs.sendMessage(tab.id, { action: "enterPickMode" });
+  }
+});
+
+// Text extracted by the content-script element picker comes back here and runs
+// through the same path as a selection.
+api.runtime.onMessage.addListener((message, sender) => {
+  if (message.action === "tts_text" && message.text && sender.tab) {
+    handleTTS(message.text, sender.tab.id);
   }
 });
 
 async function handleTTS(selectedText, tabId) {
-  api.storage.sync.get(["ttsEngine", "playbackMode"], async (data) => {
+  api.storage.sync.get(["ttsEngine"], async (data) => {
     const ttsEngine = data.ttsEngine || "google-translate";
 
     if (ttsEngine.startsWith("kokoro")) {
+      // Kokoro always streams: lower latency for long narration, and the
+      // streaming player can still export the full audio as a WAV download.
       const voice = ttsEngine.split("_").slice(1).join("_");
-
-      if (data.playbackMode === "streaming") {
-        streamKokoro(selectedText, voice, tabId);
-        return;
-      }
-
-      actionApi?.setBadgeText({ text: "…", tabId });
-      actionApi?.setBadgeBackgroundColor({ color: "#3b82f6", tabId });
-
-      try {
-        const response = await fetch("http://localhost:18001/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: selectedText, voice }),
-        });
-
-        if (!response.ok) {
-          let errorDetail = "Unknown error";
-          try {
-            const errorData = await response.json();
-            if (errorData.detail) errorDetail = errorData.detail;
-          } catch (e) {
-            console.error("Failed to parse error response:", e);
-          }
-          throw new Error(`${response.status} - ${errorDetail}`);
-        }
-
-        const audioBlob = await response.blob();
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          actionApi?.setBadgeText({ text: "", tabId });
-          api.tabs.sendMessage(tabId, {
-            action: "tts_kokoro",
-            audioBase64: reader.result.split(",")[1],
-          });
-        };
-        reader.readAsDataURL(audioBlob);
-      } catch (error) {
-        actionApi?.setBadgeText({ text: "!", tabId });
-        actionApi?.setBadgeBackgroundColor({ color: "#ef4444", tabId });
-        setTimeout(() => actionApi?.setBadgeText({ text: "", tabId }), 2500);
-        console.error("TTS server error:", error);
-        api.notifications.create({
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "TTS Server Error",
-          message: `${error.message}. Make sure the server is running at port 18001.`,
-        });
-      }
+      streamKokoro(selectedText, voice, tabId);
     } else if (ttsEngine === "google-translate") {
       const gtUrl = `https://www.google.com/speech-api/v1/synthesize?text=${encodeURIComponent(selectedText)}&enc=mpeg&lang=en-us&speed=0.45&client=lr-language-tts&use_google_only_voices=1`;
 

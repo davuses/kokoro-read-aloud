@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TTS with Kokoro",
-  "version": "2.6.13",
+  "version": "2.7.0",
   "description": "Use Kokoro TTS",
   "background": {
     "service_worker": "background.js",

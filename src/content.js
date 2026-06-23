@@ -256,7 +256,7 @@ api.runtime.onConnect.addListener((port) => {
 });
 
 api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.action === "tts_kokoro" || message.action === "tts_google_translate") {
+  if (message.action === "tts_google_translate") {
     const base64Audio = message.audioBase64;
     if (base64Audio) {
       createAudioPlayer(base64Audio);
@@ -268,8 +268,172 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (selectedText) {
       sendResponse({ success: true, text: selectedText });
     }
+  } else if (message.action === "enterPickMode") {
+    startElementPicker();
   }
 });
+
+// On-demand element picker: hover to outline an element, ↑/↓ to grow/shrink the
+// selection up/down the DOM tree, click (or Enter) to read everything inside it,
+// Esc to cancel. The element's innerText is sent to the background, which runs
+// it through the same TTS path as a normal selection.
+let pickerActive = false;
+
+function startElementPicker() {
+  if (pickerActive) return;
+  pickerActive = true;
+
+  // Outline overlay: pointer-events:none so it never intercepts the hover it's
+  // tracking, and a max z-index so it sits above sticky headers, modals, and
+  // our own player.
+  const overlay = document.createElement("div");
+  Object.assign(overlay.style, {
+    position: "fixed",
+    pointerEvents: "none",
+    zIndex: "2147483647",
+    border: "2px solid #6366f1",
+    background: "rgba(99, 102, 241, 0.15)",
+    boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.6)",
+    borderRadius: "3px",
+    boxSizing: "border-box",
+    display: "none",
+  });
+
+  const label = document.createElement("div");
+  Object.assign(label.style, {
+    position: "fixed",
+    pointerEvents: "none",
+    zIndex: "2147483647",
+    background: "rgba(12, 12, 20, 0.92)",
+    color: "#fff",
+    font: "12px/1.4 sans-serif",
+    padding: "3px 7px",
+    borderRadius: "6px",
+    whiteSpace: "nowrap",
+    display: "none",
+  });
+  label.textContent = "Click to read  •  ↑↓ resize  •  Esc / right-click cancel";
+
+  const cursorStyle = document.createElement("style");
+  cursorStyle.textContent = "* { cursor: crosshair !important; }";
+
+  document.head.appendChild(cursorStyle);
+  document.body.appendChild(overlay);
+  document.body.appendChild(label);
+
+  let baseEl = null; // element directly under the cursor
+  let level = 0; // how many parents up from baseEl is currently selected
+  let current = null;
+
+  function resolveCurrent() {
+    let el = baseEl;
+    for (let i = 0; i < level && el && el.parentElement; i++) {
+      const p = el.parentElement;
+      if (p === document.body || p === document.documentElement) break;
+      el = p;
+    }
+    return el;
+  }
+
+  function draw() {
+    current = resolveCurrent();
+    if (!current) {
+      overlay.style.display = "none";
+      label.style.display = "none";
+      return;
+    }
+    const r = current.getBoundingClientRect();
+    overlay.style.display = "block";
+    overlay.style.left = `${r.left}px`;
+    overlay.style.top = `${r.top}px`;
+    overlay.style.width = `${r.width}px`;
+    overlay.style.height = `${r.height}px`;
+    label.style.display = "block";
+    label.style.left = `${Math.max(2, r.left)}px`;
+    label.style.top = `${r.top - 24 > 0 ? r.top - 24 : r.bottom + 4}px`;
+  }
+
+  function onMouseOver(e) {
+    const t = e.target;
+    if (!t || t === overlay || t === label) return;
+    // Never target our own player chrome.
+    if (t.closest && (t.closest(".tts-player-host") || t.id === "clear-all-audio-button")) return;
+    baseEl = t;
+    level = 0;
+    draw();
+  }
+
+  function reposition() {
+    if (current) draw();
+  }
+
+  function suppress(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function onClick(e) {
+    suppress(e);
+    pick();
+  }
+
+  // Right-click cancels (in addition to Esc); the page menu stays suppressed.
+  function onContextMenu(e) {
+    suppress(e);
+    stop();
+  }
+
+  function onKeyDown(e) {
+    if (e.key === "Escape") {
+      suppress(e);
+      stop();
+    } else if (e.key === "ArrowUp") {
+      suppress(e);
+      level += 1;
+      draw();
+    } else if (e.key === "ArrowDown") {
+      suppress(e);
+      level = Math.max(0, level - 1);
+      draw();
+    } else if (e.key === "Enter") {
+      suppress(e);
+      pick();
+    }
+  }
+
+  function pick() {
+    const el = current;
+    stop();
+    if (!el) return;
+    const text = (el.innerText || el.textContent || "").trim();
+    if (text) api.runtime.sendMessage({ action: "tts_text", text });
+  }
+
+  function stop() {
+    pickerActive = false;
+    document.removeEventListener("mouseover", onMouseOver, true);
+    document.removeEventListener("click", onClick, true);
+    document.removeEventListener("mousedown", suppress, true);
+    document.removeEventListener("mouseup", suppress, true);
+    document.removeEventListener("contextmenu", onContextMenu, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("scroll", reposition, true);
+    window.removeEventListener("resize", reposition, true);
+    overlay.remove();
+    label.remove();
+    cursorStyle.remove();
+  }
+
+  // Capture phase throughout so page handlers never see the picking clicks/keys.
+  document.addEventListener("mouseover", onMouseOver, true);
+  document.addEventListener("click", onClick, true);
+  document.addEventListener("mousedown", suppress, true);
+  document.addEventListener("mouseup", suppress, true);
+  document.addEventListener("contextmenu", onContextMenu, true);
+  document.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("scroll", reposition, true);
+  window.addEventListener("resize", reposition, true);
+}
 
 async function createAudioPlayer(base64Audio) {
   const binaryString = atob(base64Audio);
@@ -559,7 +723,10 @@ function createStreamingPlayer(port) {
     }
   }
 
-  const downloadButton = makePlayerButton("⬇", "Download audio");
+  // Disabled until generation finishes, so a download can't capture a
+  // half-generated clip. Re-enabled once all audio has arrived.
+  const downloadButton = makePlayerButton("⬇", "Download (ready when finished)");
+  downloadButton.disabled = true;
   downloadButton.addEventListener("click", () => {
     let n = 0;
     for (const p of pcmParts) n += p.length;
@@ -611,6 +778,14 @@ function createStreamingPlayer(port) {
     }
   }
 
+  // Allow the WAV download once no more audio is coming (and some arrived).
+  function allowDownload() {
+    if (pcmParts.length) {
+      downloadButton.disabled = false;
+      downloadButton.title = "Download audio";
+    }
+  }
+
   function handleMessage(msg) {
     if (msg.type === "chunk") {
       const bin = atob(msg.pcm_b64);
@@ -619,8 +794,10 @@ function createStreamingPlayer(port) {
       addChunk(msg.sr, new Int16Array(u8.buffer));
     } else if (msg.type === "end") {
       receivedEnd = true;
+      allowDownload();
     } else if (msg.type === "error") {
       receivedEnd = true;
+      allowDownload();
       timeDisplay.textContent = `⚠ ${String(msg.message).slice(0, 40)}`;
     }
   }
@@ -630,7 +807,7 @@ function createStreamingPlayer(port) {
   onPortMessage = handleMessage;
   for (const m of pending) handleMessage(m);
 
-  port.onDisconnect.addListener(() => { receivedEnd = true; });
+  port.onDisconnect.addListener(() => { receivedEnd = true; allowDownload(); });
 
   host._cleanup = () => {
     clearInterval(uiTimer);
