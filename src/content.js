@@ -143,6 +143,121 @@ function adjustAudioPositions() {
   }
 }
 
+function ensureClearAllButton() {
+  let btn = document.querySelector("#clear-all-audio-button");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "clear-all-audio-button";
+    btn.textContent = "× Clear all";
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tts-player-host").forEach((el) => {
+        if (el._cleanup) el._cleanup();
+        el.remove();
+      });
+      btn.style.display = "none";
+    });
+    document.body.appendChild(btn);
+  }
+  return btn;
+}
+
+// Shared player chrome: a fixed-position shadow host (so page CSS can't leak
+// in) containing the flex row both the buffered and streaming players fill in.
+function createPlayerShell() {
+  ensureClearAllButton();
+  const host = document.createElement("div");
+  host.classList.add("tts-player-host");
+  const shadow = host.attachShadow({ mode: "open" });
+  const styleEl = document.createElement("style");
+  styleEl.textContent = PLAYER_CSS;
+  shadow.appendChild(styleEl);
+  const audioContainer = document.createElement("div");
+  audioContainer.classList.add("audio-player-container");
+  shadow.appendChild(audioContainer);
+  host.style.position = "fixed";
+  host.style.right = "10px";
+  host.style.zIndex = "9999";
+  return { host, audioContainer };
+}
+
+// Volume-boost multipliers, indexed by the popup's gain slider.
+const GAIN_LEVELS = [1.0, 1.25, 1.5, 1.75, 2.0];
+
+function formatTime(s) {
+  const m = Math.floor(s / 60);
+  return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+}
+
+function makePlayerButton(text, title) {
+  const b = document.createElement("button");
+  b.classList.add("player-btn");
+  if (text != null) b.textContent = text;
+  if (title) b.title = title;
+  return b;
+}
+
+function makeCloseButton(host) {
+  const b = document.createElement("button");
+  b.innerHTML = "&times;";
+  b.classList.add("close-button");
+  b.addEventListener("click", () => {
+    host._cleanup();
+    host.remove();
+    adjustAudioPositions();
+  });
+  return b;
+}
+
+// Progress bar with fill + thumb and click/drag seeking. onSeek(fraction) fires
+// on release; canSeek() gates interaction (e.g. until any audio exists).
+function createProgressBar(onSeek, canSeek = () => true) {
+  const track = document.createElement("div");
+  track.classList.add("progress-track");
+  const fill = document.createElement("div");
+  fill.classList.add("progress-fill");
+  fill.style.width = "0%";
+  const thumb = document.createElement("div");
+  thumb.classList.add("progress-thumb");
+  thumb.style.left = "0%";
+  track.appendChild(fill);
+  track.appendChild(thumb);
+
+  let dragging = false;
+  function setProgress(fraction) {
+    const pct = `${Math.max(0, Math.min(1, fraction)) * 100}%`;
+    fill.style.width = pct;
+    thumb.style.left = pct;
+  }
+  function fractionFrom(e) {
+    const rect = track.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  }
+  track.addEventListener("mousedown", (e) => {
+    if (!canSeek()) return;
+    e.preventDefault();
+    dragging = true;
+    track.classList.add("progress-track--dragging");
+    setProgress(fractionFrom(e));
+    const onMove = (e) => setProgress(fractionFrom(e));
+    const onUp = (e) => {
+      dragging = false;
+      track.classList.remove("progress-track--dragging");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      onSeek(fractionFrom(e));
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+
+  return { track, setProgress, isDragging: () => dragging };
+}
+
+api.runtime.onConnect.addListener((port) => {
+  if (port.name !== "tts-stream") return;
+  createStreamingPlayer(port);
+});
+
 api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === "tts_kokoro" || message.action === "tts_google_translate") {
     const base64Audio = message.audioBase64;
@@ -169,9 +284,8 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   }
 
   const audioCtx = new AudioContext();
-  const gainLevels = [1.0, 1.25, 1.5, 1.75, 2.0];
   const gainNode = audioCtx.createGain();
-  gainNode.gain.value = gainLevels[gainIndex] ?? 1.0;
+  gainNode.gain.value = GAIN_LEVELS[gainIndex] ?? 1.0;
   gainNode.connect(audioCtx.destination);
 
   let audioBuffer;
@@ -189,17 +303,11 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   let pauseOffset = 0;
   let isPlaying = false;
   let ended = false;
-  let isDragging = false;
   let timer = null;
 
   function getElapsed() {
     if (!isPlaying) return pauseOffset;
     return Math.min(audioCtx.currentTime - startedAt, duration);
-  }
-
-  function formatTime(s) {
-    const m = Math.floor(s / 60);
-    return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
   }
 
   function startSource(offset) {
@@ -231,37 +339,9 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     startTimer();
   }
 
-  // Clear all button lives in the real DOM (outside shadow)
-  let clearAllButton = document.querySelector("#clear-all-audio-button");
-  if (!clearAllButton) {
-    clearAllButton = document.createElement("button");
-    clearAllButton.id = "clear-all-audio-button";
-    clearAllButton.textContent = "× Clear all";
-    clearAllButton.addEventListener("click", () => {
-      document.querySelectorAll(".tts-player-host").forEach((el) => {
-        if (el._cleanup) el._cleanup();
-        el.remove();
-      });
-      clearAllButton.style.display = "none";
-    });
-    document.body.appendChild(clearAllButton);
-  }
-  // Shadow host — sits in the real DOM for querying/positioning;
-  // the player lives inside its shadow so page CSS can't interfere.
-  const host = document.createElement("div");
-  host.classList.add("tts-player-host");
-  const shadow = host.attachShadow({ mode: "open" });
-  const styleEl = document.createElement("style");
-  styleEl.textContent = PLAYER_CSS;
-  shadow.appendChild(styleEl);
+  const { host, audioContainer } = createPlayerShell();
 
-  const audioContainer = document.createElement("div");
-  audioContainer.classList.add("audio-player-container");
-  shadow.appendChild(audioContainer);
-
-  // Play/Pause button
-  const playPauseBtn = document.createElement("button");
-  playPauseBtn.classList.add("player-btn");
+  const playPauseBtn = makePlayerButton();
 
   function updatePlayButton() {
     playPauseBtn.textContent = isPlaying ? "⏸" : ended ? "↺" : "▶";
@@ -281,62 +361,14 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     }
   });
 
-  // Progress bar
-  const progressTrack = document.createElement("div");
-  progressTrack.classList.add("progress-track");
-
-  const progressFill = document.createElement("div");
-  progressFill.classList.add("progress-fill");
-  progressFill.style.width = "0%";
-
-  const progressThumb = document.createElement("div");
-  progressThumb.classList.add("progress-thumb");
-  progressThumb.style.left = "0%";
-
-  progressTrack.appendChild(progressFill);
-  progressTrack.appendChild(progressThumb);
-
-  function setProgress(fraction) {
-    const pct = `${fraction * 100}%`;
-    progressFill.style.width = pct;
-    progressThumb.style.left = pct;
-  }
-
-  function getFraction(e) {
-    const rect = progressTrack.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  }
-
-  function seekToFraction(fraction) {
-    const seekTo = fraction * duration;
+  // Progress bar — seek restarts playback from the clicked position.
+  const progress = createProgressBar((fraction) => {
     if (isPlaying) source._stopManually();
     isPlaying = false;
-    pauseOffset = seekTo;
-    startSource(seekTo);
+    pauseOffset = fraction * duration;
+    startSource(pauseOffset);
     ended = false;
     updatePlayButton();
-  }
-
-  progressTrack.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    isDragging = true;
-    progressTrack.classList.add("progress-track--dragging");
-    setProgress(getFraction(e));
-
-    const onMouseMove = (e) => {
-      setProgress(getFraction(e));
-    };
-
-    const onMouseUp = (e) => {
-      isDragging = false;
-      progressTrack.classList.remove("progress-track--dragging");
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-      seekToFraction(getFraction(e));
-    };
-
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
   });
 
   // Time display
@@ -346,9 +378,7 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   function updateTime() {
     const elapsed = getElapsed();
     timeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(duration)}`;
-    if (!isDragging) {
-      setProgress(elapsed / duration);
-    }
+    if (!progress.isDragging()) progress.setProgress(elapsed / duration);
   }
 
   function startTimer() {
@@ -362,11 +392,7 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     }, 250);
   }
 
-  // Download button
-  const downloadButton = document.createElement("button");
-  downloadButton.textContent = "⬇";
-  downloadButton.title = "Download audio";
-  downloadButton.classList.add("player-btn");
+  const downloadButton = makePlayerButton("⬇", "Download audio");
   downloadButton.addEventListener("click", () => {
     // Rebuild bytes from base64: the Uint8Array passed to decodeAudioData gets
     // detached. A blob: download URL isn't governed by media-src CSP, so this
@@ -384,25 +410,14 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
-  // Close button
-  const closeButton = document.createElement("button");
-  closeButton.innerHTML = "&times;";
-  closeButton.classList.add("close-button");
-  closeButton.addEventListener("click", () => {
-    host._cleanup();
-    host.remove();
-    adjustAudioPositions();
-  });
+  const closeButton = makeCloseButton(host);
 
   audioContainer.appendChild(playPauseBtn);
-  audioContainer.appendChild(progressTrack);
+  audioContainer.appendChild(progress.track);
   audioContainer.appendChild(timeDisplay);
   audioContainer.appendChild(downloadButton);
   audioContainer.appendChild(closeButton);
 
-  host.style.position = "fixed";
-  host.style.right = "10px";
-  host.style.zIndex = "9999";
   document.body.appendChild(host);
   adjustAudioPositions();
 
@@ -426,4 +441,238 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     audioCtx.close();
   };
 
+}
+
+// Streaming player: fed PCM chunks over a port as the server generates them.
+// Plays them gaplessly with a rolling-window scheduler (only ~1s scheduled
+// ahead) so pause/seek stay simple, and starts on the first chunk (~1s) instead
+// of waiting for the whole narration.
+function createStreamingPlayer(port) {
+  // Attach the message handler synchronously so no early chunks are missed.
+  const pending = [];
+  let onPortMessage = (msg) => pending.push(msg);
+  port.onMessage.addListener((msg) => onPortMessage(msg));
+
+  const { host, audioContainer } = createPlayerShell();
+
+  const audioCtx = new AudioContext();
+  const gainNode = audioCtx.createGain();
+  gainNode.connect(audioCtx.destination);
+  api.storage.sync.get(["volumeBoostIndex"], (r) => {
+    gainNode.gain.value = GAIN_LEVELS[r.volumeBoostIndex ?? 0] ?? 1.0;
+  });
+
+  const LOOKAHEAD = 1.0; // seconds of audio scheduled ahead of the playhead
+  const chunks = []; // { buffer, start } cumulative timeline
+  const pcmParts = []; // Int16Array per chunk, kept for WAV download
+  let sampleRate = 24000;
+  let totalDuration = 0; // grows as chunks arrive
+  let receivedEnd = false;
+
+  let isPlaying = false;
+  let finished = false;
+  let startOffset = 0; // timeline position where the current run began
+  let startCtxTime = 0; // audioCtx.currentTime at run start
+  let scheduledUntil = 0; // timeline position scheduled so far this run
+  let activeSources = [];
+  let pumpTimer = null;
+  let uiTimer = null;
+
+  function position() {
+    if (!isPlaying) return startOffset;
+    return Math.min(startOffset + (audioCtx.currentTime - startCtxTime), totalDuration);
+  }
+
+  function stopActiveSources() {
+    for (const s of activeSources) {
+      try { s.onended = null; s.stop(); } catch (e) { /* already stopped */ }
+    }
+    activeSources = [];
+  }
+
+  function chunkIndexAt(p) {
+    for (let i = 0; i < chunks.length; i++) {
+      if (p < chunks[i].start + chunks[i].buffer.duration) return i;
+    }
+    return chunks.length - 1;
+  }
+
+  // Schedule chunks up to LOOKAHEAD ahead of the playhead. Called on a timer
+  // and whenever a new chunk arrives.
+  function pump() {
+    if (!isPlaying) return;
+    const playhead = startOffset + (audioCtx.currentTime - startCtxTime);
+    while (scheduledUntil < totalDuration &&
+           scheduledUntil - playhead < LOOKAHEAD) {
+      const i = chunkIndexAt(scheduledUntil);
+      const intoBuffer = scheduledUntil - chunks[i].start;
+      const whenCtx = startCtxTime + (scheduledUntil - startOffset);
+      const src = audioCtx.createBufferSource();
+      src.buffer = chunks[i].buffer;
+      src.connect(gainNode);
+      src.start(Math.max(whenCtx, audioCtx.currentTime), Math.max(0, intoBuffer));
+      activeSources.push(src);
+      src.onended = () => {
+        const idx = activeSources.indexOf(src);
+        if (idx >= 0) activeSources.splice(idx, 1);
+      };
+      scheduledUntil = chunks[i].start + chunks[i].buffer.duration;
+    }
+    // Reached the end of all received audio.
+    if (receivedEnd && position() >= totalDuration - 0.02) {
+      startOffset = totalDuration; // park at the end so the bar/time read 100%
+      isPlaying = false;
+      finished = true;
+      updatePlayButton();
+    }
+  }
+
+  function play(fromOffset) {
+    stopActiveSources();
+    startOffset = Math.max(0, Math.min(fromOffset, totalDuration));
+    startCtxTime = audioCtx.currentTime;
+    scheduledUntil = startOffset;
+    isPlaying = true;
+    finished = false;
+    audioCtx.resume();
+    pump();
+    updatePlayButton();
+  }
+
+  function pause() {
+    startOffset = position();
+    stopActiveSources();
+    isPlaying = false;
+    updatePlayButton();
+  }
+
+  // --- UI (shares the same chrome as the buffered player) ---
+  const playPauseBtn = makePlayerButton();
+  function updatePlayButton() {
+    playPauseBtn.textContent = isPlaying ? "⏸" : finished ? "↺" : "▶";
+  }
+  playPauseBtn.addEventListener("click", () => {
+    if (isPlaying) pause();
+    else play(finished ? 0 : startOffset);
+  });
+
+  const progress = createProgressBar(
+    (fraction) => play(fraction * totalDuration), // seek within received audio
+    () => totalDuration > 0
+  );
+
+  const timeDisplay = document.createElement("span");
+  timeDisplay.classList.add("time-display");
+  function updateTime() {
+    const live = receivedEnd ? "" : " …";
+    timeDisplay.textContent =
+      `${formatTime(position())} / ${formatTime(totalDuration)}${live}`;
+    if (!progress.isDragging() && totalDuration > 0) {
+      progress.setProgress(position() / totalDuration);
+    }
+  }
+
+  const downloadButton = makePlayerButton("⬇", "Download audio");
+  downloadButton.addEventListener("click", () => {
+    let n = 0;
+    for (const p of pcmParts) n += p.length;
+    const pcm = new Int16Array(n);
+    let off = 0;
+    for (const p of pcmParts) { pcm.set(p, off); off += p.length; }
+    const url = URL.createObjectURL(pcmToWavBlob(pcm, sampleRate));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tts-${Date.now()}.wav`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  const closeButton = makeCloseButton(host);
+
+  audioContainer.appendChild(playPauseBtn);
+  audioContainer.appendChild(progress.track);
+  audioContainer.appendChild(timeDisplay);
+  audioContainer.appendChild(downloadButton);
+  audioContainer.appendChild(closeButton);
+  document.body.appendChild(host);
+  adjustAudioPositions();
+
+  updatePlayButton();
+  updateTime();
+  uiTimer = setInterval(updateTime, 200);
+  pumpTimer = setInterval(pump, 150);
+
+  // --- incoming chunks ---
+  function addChunk(sr, int16) {
+    sampleRate = sr;
+    const buffer = audioCtx.createBuffer(1, int16.length, sr);
+    const ch = buffer.getChannelData(0);
+    for (let i = 0; i < int16.length; i++) ch[i] = int16[i] / 32768;
+    chunks.push({ buffer, start: totalDuration });
+    pcmParts.push(int16);
+    totalDuration += buffer.duration;
+
+    // Auto-start on the first chunk if nothing else is playing on the page.
+    if (chunks.length === 1) {
+      const otherMedia = Array.from(document.querySelectorAll("audio, video"))
+        .some((el) => !el.paused && !el.ended && el.readyState > 2);
+      if (!otherMedia) play(0);
+    } else if (isPlaying) {
+      pump();
+    }
+  }
+
+  function handleMessage(msg) {
+    if (msg.type === "chunk") {
+      const bin = atob(msg.pcm_b64);
+      const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      addChunk(msg.sr, new Int16Array(u8.buffer));
+    } else if (msg.type === "end") {
+      receivedEnd = true;
+    } else if (msg.type === "error") {
+      receivedEnd = true;
+      timeDisplay.textContent = `⚠ ${String(msg.message).slice(0, 40)}`;
+    }
+  }
+
+  // Drain anything buffered before the player finished initializing, then
+  // switch to handling messages directly.
+  onPortMessage = handleMessage;
+  for (const m of pending) handleMessage(m);
+
+  port.onDisconnect.addListener(() => { receivedEnd = true; });
+
+  host._cleanup = () => {
+    clearInterval(uiTimer);
+    clearInterval(pumpTimer);
+    stopActiveSources();
+    audioCtx.close();
+    try { port.disconnect(); } catch (e) { /* already gone */ }
+  };
+}
+
+// Build a minimal 16-bit mono WAV blob from Int16 PCM samples.
+function pcmToWavBlob(int16, sampleRate) {
+  const dataLen = int16.length * 2;
+  const buf = new ArrayBuffer(44 + dataLen);
+  const dv = new DataView(buf);
+  const wr = (off, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)); };
+  wr(0, "RIFF");
+  dv.setUint32(4, 36 + dataLen, true);
+  wr(8, "WAVE");
+  wr(12, "fmt ");
+  dv.setUint32(16, 16, true);
+  dv.setUint16(20, 1, true); // PCM
+  dv.setUint16(22, 1, true); // mono
+  dv.setUint32(24, sampleRate, true);
+  dv.setUint32(28, sampleRate * 2, true); // byte rate
+  dv.setUint16(32, 2, true); // block align
+  dv.setUint16(34, 16, true); // bits
+  wr(36, "data");
+  dv.setUint32(40, dataLen, true);
+  new Int16Array(buf, 44).set(int16);
+  return new Blob([buf], { type: "audio/wav" });
 }

@@ -3,10 +3,21 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 document.addEventListener("DOMContentLoaded", () => {
   const ttsSelect = document.getElementById("tts-select");
   const gainSlider = document.getElementById("gain-slider");
+  const streamingToggle = document.getElementById("streaming-toggle");
 
   api.storage.sync.get("ttsEngine", (data) => {
     ttsSelect.value = data.ttsEngine || "google-translate";
     updateServerStatus();
+  });
+
+  api.storage.sync.get(["playbackMode"], (r) => {
+    streamingToggle.checked = r.playbackMode === "streaming";
+  });
+
+  streamingToggle.addEventListener("change", () => {
+    api.storage.sync.set({
+      playbackMode: streamingToggle.checked ? "streaming" : "buffered",
+    });
   });
 
   ttsSelect.addEventListener("change", () => {
