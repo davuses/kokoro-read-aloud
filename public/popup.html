@@ -13,15 +13,10 @@
         <label for="tts-select" class="option-label"
           >Choose a TTS Service</label
         >
+        <!-- Kokoro voices are populated by popup.js from the server's /voices
+             endpoint (with a hardcoded fallback if the server is offline). -->
         <select id="tts-select" class="option-select">
           <option value="google-translate" selected>Google Translate</option>
-          <option value="kokoro_af_bella">Kokoro af bella</option>
-          <option value="kokoro_af_heart">Kokoro af heart</option>
-          <option value="kokoro_af_sarah">Kokoro af sarah</option>
-          <option value="kokoro_af_sky">Kokoro af sky</option>
-          <option value="kokoro_am_echo">Kokoro am echo</option>
-          <option value="kokoro_am_liam">Kokoro am liam</option>
-          <option value="kokoro_am_michael">Kokoro am michael</option>
         </select>
         <div id="server-status" class="server-status" style="display: none;"></div>
       </div>
