@@ -69,9 +69,6 @@ terminated by `{"done": true}`, or `{"error": "..."}` on mid-stream failure.
 - `ALLOWED_ORIGINS` — comma-separated CORS origins, e.g.
   `https://example.com,https://app.example.com`. Defaults to `*` (which, per
   the CORS spec, is served without credentials).
-- `VOLUME_GAIN` in `kokoro_model.py` — output volume boost. The gain is
-  `tanh` soft-limited, so higher values get genuinely louder before saturating
-  rather than hard-clipping. Tune to taste.
 
 ## Notes
 

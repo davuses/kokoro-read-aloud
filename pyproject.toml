@@ -5,6 +5,7 @@ description = "FastAPI server exposing the Kokoro text-to-speech model over an H
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "en-core-web-sm",
     "fastapi>=0.116.1",
     "kokoro>=0.9.4",
     "numpy<2.0",
@@ -12,3 +13,6 @@ dependencies = [
     "soundfile>=0.13.1",
     "uvicorn>=0.35.0",
 ]
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }

@@ -12,23 +12,6 @@ logger = logging.getLogger(__name__)
 
 # Native sample rate of the Kokoro model output.
 SAMPLE_RATE = 24000
-# Volume boost applied to the raw model output. Values above the [-1, 1]
-# range are soft-limited (see adjust_volume), so a higher gain increases
-# perceived loudness instead of just clipping.
-VOLUME_GAIN = 6.0
-
-
-def adjust_volume(audio: np.ndarray, gain: float) -> np.ndarray:
-    """Boost volume by ``gain``, soft-limiting peaks to avoid hard clipping.
-
-    A plain multiply-then-normalize would peak-normalize every clip back to
-    1.0, cancelling out any gain increase. Instead we apply the gain and pass
-    the result through ``tanh``, which is near-linear for quiet samples and
-    saturates smoothly toward +/-1 for loud ones. This makes the audio
-    genuinely louder as ``gain`` rises, with gentle saturation rather than
-    abrupt clipping.
-    """
-    return np.tanh(audio * gain).astype(np.float32)
 
 
 class KokoroModel:
@@ -65,7 +48,7 @@ class KokoroModel:
     def stream_audio(
         self, text: str, voice: str, speed=1, split_pattern=r"\n+"
     ):
-        """Yield volume-adjusted float32 audio chunks as they are generated.
+        """Yield float32 audio chunks as they are generated.
 
         Kokoro's pipeline yields one chunk per <=510-token (sentence-grouped)
         piece, so this starts producing audio after the first sentence rather
@@ -80,7 +63,7 @@ class KokoroModel:
         for _, _, audio in generator:
             if audio is None:
                 continue
-            yield adjust_volume(np.asarray(audio, dtype=np.float32), VOLUME_GAIN)
+            yield np.asarray(audio, dtype=np.float32)
 
     def generate_audio(
         self, text: str, voice: str, speed=1, split_pattern=r"\n+"

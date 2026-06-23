@@ -11,7 +11,10 @@
       "Bash(uv run *)",
       "Bash(node --check src/background.js)",
       "Bash(python -m py_compile server.py)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(python -m py_compile kokoro_model.py server.py)",
+      "Bash(node --check public/popup.js)",
+      "Bash(uv add *)"
     ],
     "additionalDirectories": [
       "/home/sakana/kokoro-tts-extension/src",
