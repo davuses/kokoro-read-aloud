@@ -88,3 +88,26 @@ body {
   #gain-slider {
     width: 100%;
   }
+
+  .server-status {
+    font-size: 12px;
+    margin-top: 6px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    text-align: left;
+  }
+
+  .server-status.online {
+    color: #15803d;
+    background: #f0fdf4;
+  }
+
+  .server-status.offline {
+    color: #dc2626;
+    background: #fef2f2;
+  }
+
+  .server-status.checking {
+    color: #92400e;
+    background: #fffbeb;
+  }

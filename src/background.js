@@ -1,4 +1,5 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
+const actionApi = api.action ?? api.browserAction;
 
 api.runtime.onInstalled.addListener(() => {
   api.contextMenus.create({
@@ -18,92 +19,83 @@ api.runtime.onStartup.addListener(() => {
 
 api.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "ttsWithKokoro") {
-    const selectedText = info.selectionText;
-    handleTTS(selectedText, tab.id);
+    handleTTS(info.selectionText, tab.id);
   }
 });
 
 async function handleTTS(selectedText, tabId) {
   api.storage.sync.get("ttsEngine", async (data) => {
     const ttsEngine = data.ttsEngine || "google-translate";
-    if (ttsEngine.startsWith("kokoro") || ttsEngine.startsWith("edge")) {
-      // ttsEngine looks like "kokoro_af_bella" or "edge_en-US-AvaNeural":
-      // the prefix is the server engine, the rest is the voice name.
-      const engine = ttsEngine.startsWith("edge") ? "edge" : "kokoro";
+
+    if (ttsEngine.startsWith("kokoro")) {
       const voice = ttsEngine.split("_").slice(1).join("_");
 
+      actionApi?.setBadgeText({ text: "…", tabId });
+      actionApi?.setBadgeBackgroundColor({ color: "#3b82f6", tabId });
+
       try {
-        const apiUrl = "http://localhost:18001/tts";
-        const response = await fetch(apiUrl, {
+        const response = await fetch("http://localhost:18001/tts", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ text: selectedText, voice: voice, engine: engine }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: selectedText, voice }),
         });
 
         if (!response.ok) {
-          const status = response.status;
           let errorDetail = "Unknown error";
           try {
             const errorData = await response.json();
-            if (errorData.detail) {
-              errorDetail = errorData.detail;
-            }
+            if (errorData.detail) errorDetail = errorData.detail;
           } catch (e) {
             console.error("Failed to parse error response:", e);
           }
-          const errorMessage = `Error playing TTS audio: ${status} - ${errorDetail}`;
-
-          console.error(errorMessage);
-
-          api.notifications.create({
-            type: "basic",
-            iconUrl: "icons/icon128.png",
-            title: "TTS Server Error",
-            message: errorMessage,
-          });
-          return;
+          throw new Error(`${response.status} - ${errorDetail}`);
         }
 
         const audioBlob = await response.blob();
-
         const reader = new FileReader();
         reader.onloadend = () => {
-          const base64Audio = reader.result.split(",")[1]; // Get base64 part
-
-          // Send the base64 audio to the content script
+          actionApi?.setBadgeText({ text: "", tabId });
           api.tabs.sendMessage(tabId, {
             action: "tts_kokoro",
-            audioBase64: base64Audio,
+            audioBase64: reader.result.split(",")[1],
           });
         };
         reader.readAsDataURL(audioBlob);
       } catch (error) {
-        console.error("Error playing TTS audio:", error);
+        actionApi?.setBadgeText({ text: "!", tabId });
+        actionApi?.setBadgeBackgroundColor({ color: "#ef4444", tabId });
+        setTimeout(() => actionApi?.setBadgeText({ text: "", tabId }), 2500);
+        console.error("TTS server error:", error);
         api.notifications.create({
           type: "basic",
           iconUrl: "icons/icon128.png",
           title: "TTS Server Error",
-          message: `Error playing TTS audio:, ${error}. Please make sure the server is running at port 18001`,
+          message: `${error.message}. Make sure the server is running at port 18001.`,
         });
       }
     } else if (ttsEngine === "google-translate") {
       const gtUrl = `https://www.google.com/speech-api/v1/synthesize?text=${encodeURIComponent(selectedText)}&enc=mpeg&lang=en-us&speed=0.45&client=lr-language-tts&use_google_only_voices=1`;
+
+      actionApi?.setBadgeText({ text: "…", tabId });
+      actionApi?.setBadgeBackgroundColor({ color: "#3b82f6", tabId });
+
       try {
         const response = await fetch(gtUrl);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const audioBlob = await response.blob();
         const reader = new FileReader();
         reader.onloadend = () => {
-          const base64Audio = reader.result.split(",")[1];
+          actionApi?.setBadgeText({ text: "", tabId });
           api.tabs.sendMessage(tabId, {
             action: "tts_google_translate",
-            audioBase64: base64Audio,
+            audioBase64: reader.result.split(",")[1],
           });
         };
         reader.readAsDataURL(audioBlob);
       } catch (error) {
+        actionApi?.setBadgeText({ text: "!", tabId });
+        actionApi?.setBadgeBackgroundColor({ color: "#ef4444", tabId });
+        setTimeout(() => actionApi?.setBadgeText({ text: "", tabId }), 2500);
         api.notifications.create({
           type: "basic",
           iconUrl: "icons/icon128.png",
@@ -117,28 +109,17 @@ async function handleTTS(selectedText, tabId) {
 
 api.commands.onCommand.addListener(async (command) => {
   if (command === "Text to Speech") {
-    // Get the active tab
-    const [tab] = await api.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-
-    // Send a message to the content script to get the selected text
+    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
     api.tabs.sendMessage(tab.id, { action: "getSelectedText" }, (response) => {
-      if (response && response.text) {
-        const selectedText = response.text;
-        if (selectedText) {
-          console.log("Selected Text:", selectedText);
-          handleTTS(selectedText, tab.id);
-        } else {
-          console.log("No text selected.");
-          api.notifications.create({
-            type: "basic",
-            iconUrl: "icons/icon128.png",
-            title: "No Text Selected",
-            message: "Please select some text before using the TTS feature.",
-          });
-        }
+      if (response?.text) {
+        handleTTS(response.text, tab.id);
+      } else {
+        api.notifications.create({
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: "No Text Selected",
+          message: "Please select some text before using the TTS feature.",
+        });
       }
     });
   }

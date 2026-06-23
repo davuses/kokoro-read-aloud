@@ -1,53 +1,52 @@
+const api = typeof browser !== "undefined" ? browser : chrome;
+
 document.addEventListener("DOMContentLoaded", () => {
   const ttsSelect = document.getElementById("tts-select");
-
-  chrome.storage.sync.get("ttsEngine", (data) => {
-    if (data.ttsEngine) {
-      ttsSelect.value = data.ttsEngine;
-    } else {
-      ttsSelect.value = "google-translate";
-    }
-  });
-
-  // Save the selected TTS engine when the button is clicked
-  ttsSelect.addEventListener("change", () => {
-    const selectedEngine = ttsSelect.value;
-    chrome.storage.sync.set({ ttsEngine: selectedEngine }, () => {
-      console.log("Settings saved for:", selectedEngine);
-    });
-  });
-
   const gainSlider = document.getElementById("gain-slider");
-  const gainLevels = [1.0, 1.25, 1.5, 1.75, 2.0];
-  chrome.storage.sync.get(["volumeBoostIndex"], (result) => {
-    if (result.volumeBoostIndex !== undefined) {
-      gainSlider.value = result.volumeBoostIndex;
-    }
+
+  api.storage.sync.get("ttsEngine", (data) => {
+    ttsSelect.value = data.ttsEngine || "google-translate";
+    updateServerStatus();
+  });
+
+  ttsSelect.addEventListener("change", () => {
+    api.storage.sync.set({ ttsEngine: ttsSelect.value });
+    updateServerStatus();
+  });
+
+  ttsSelect.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const next = Math.max(0, Math.min(ttsSelect.options.length - 1, ttsSelect.selectedIndex + (e.deltaY > 0 ? 1 : -1)));
+    ttsSelect.selectedIndex = next;
+    ttsSelect.dispatchEvent(new Event("change"));
+  });
+
+  api.storage.sync.get(["volumeBoostIndex"], (result) => {
+    if (result.volumeBoostIndex !== undefined) gainSlider.value = result.volumeBoostIndex;
   });
 
   gainSlider.addEventListener("input", () => {
-    const index = parseInt(gainSlider.value, 10);
-    chrome.storage.sync.set({ volumeBoostIndex: index }, () => {
-      console.log("Saved volume boost:", gainLevels[index]);
-    });
+    api.storage.sync.set({ volumeBoostIndex: parseInt(gainSlider.value, 10) });
   });
 });
-const select = document.getElementById("tts-select");
 
-select.addEventListener("wheel", (event) => {
-  event.preventDefault(); // Prevent default page scrolling
+function updateServerStatus() {
+  const ttsSelect = document.getElementById("tts-select");
+  const indicator = document.getElementById("server-status");
+  const isKokoro = ttsSelect.value.startsWith("kokoro");
+  indicator.style.display = isKokoro ? "block" : "none";
+  if (isKokoro) pingServer(indicator);
+}
 
-  const currentIndex = select.selectedIndex;
-  const maxIndex = select.options.length - 1;
-
-  if (event.deltaY > 0 && currentIndex < maxIndex) {
-    // Scroll down: go to next option
-    select.selectedIndex += 1;
-  } else if (event.deltaY < 0 && currentIndex > 0) {
-    // Scroll up: go to previous option
-    select.selectedIndex -= 1;
+async function pingServer(indicator) {
+  indicator.textContent = "● Checking…";
+  indicator.className = "server-status checking";
+  try {
+    await fetch("http://localhost:18001/", { signal: AbortSignal.timeout(1500) });
+    indicator.textContent = "● Server online";
+    indicator.className = "server-status online";
+  } catch {
+    indicator.textContent = "● Server offline — start kokoro-server";
+    indicator.className = "server-status offline";
   }
-
-  // Optional: trigger change event if needed
-  select.dispatchEvent(new Event("change"));
-});
+}

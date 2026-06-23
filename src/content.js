@@ -1,5 +1,148 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 
+const PLAYER_CSS = `
+  .audio-player-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(12, 12, 20, 0.82);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 8px 12px;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    transition: all 0.3s ease;
+  }
+
+  .player-btn {
+    padding: 5px 11px;
+    border: none;
+    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: sans-serif;
+    font-size: 14px;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .player-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.5);
+  }
+
+  .player-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(59, 130, 246, 0.25);
+  }
+
+  .player-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .progress-track {
+    width: 140px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    transition: height 0.15s ease;
+  }
+
+  .progress-track:hover,
+  .progress-track--dragging {
+    height: 8px;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #6366f1);
+    border-radius: 3px;
+    pointer-events: none;
+    box-shadow: 0 0 8px rgba(99, 102, 241, 0.45);
+  }
+
+  .progress-thumb {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    width: 12px;
+    height: 12px;
+    background: white;
+    border-radius: 50%;
+    pointer-events: none;
+    box-shadow: 0 0 6px rgba(99, 102, 241, 0.7);
+    transition: transform 0.15s ease;
+  }
+
+  .progress-track:hover .progress-thumb,
+  .progress-track--dragging .progress-thumb {
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  .time-display {
+    color: rgba(255, 255, 255, 0.7);
+    font-family: sans-serif;
+    font-size: 12px;
+    min-width: 75px;
+    display: inline-block;
+    letter-spacing: 0.2px;
+  }
+
+  .close-button {
+    background-color: rgba(231, 76, 60, 0.85);
+    color: white;
+    font-size: 18px;
+    font-weight: bold;
+    border: none;
+    padding: 8px;
+    margin-left: 2px;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.15s ease;
+  }
+
+  .close-button:hover {
+    background-color: #c0392b;
+    transform: scale(1.1);
+  }
+
+  .close-button:focus {
+    outline: none;
+    box-shadow: 0 0 5px rgba(231, 76, 60, 0.8);
+  }
+`;
+
+const BASE_BOTTOM = 10;
+const PLAYER_SPACING = 56;
+
+function adjustAudioPositions() {
+  const hosts = document.querySelectorAll(".tts-player-host");
+  hosts.forEach((h, index) => {
+    h.style.bottom = `${BASE_BOTTOM + index * PLAYER_SPACING}px`;
+  });
+  const btn = document.querySelector("#clear-all-audio-button");
+  if (!btn) return;
+  if (hosts.length >= 2) {
+    btn.style.display = "block";
+    btn.style.bottom = `${BASE_BOTTOM + hosts.length * PLAYER_SPACING}px`;
+  } else {
+    btn.style.display = "none";
+  }
+}
+
 api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === "tts_kokoro" || message.action === "tts_google_translate") {
     const base64Audio = message.audioBase64;
@@ -47,6 +190,7 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   let isPlaying = false;
   let ended = false;
   let isDragging = false;
+  let timer = null;
 
   function getElapsed() {
     if (!isPlaying) return pauseOffset;
@@ -79,21 +223,22 @@ async function createAudioPlayer(base64Audio, gainIndex) {
       if (source === thisSource && !stoppedManually) {
         isPlaying = false;
         ended = true;
-        pauseOffset = 0;
+        pauseOffset = duration;
         updatePlayButton();
       }
     };
+
+    startTimer();
   }
 
-  // Clear all button
+  // Clear all button lives in the real DOM (outside shadow)
   let clearAllButton = document.querySelector("#clear-all-audio-button");
   if (!clearAllButton) {
     clearAllButton = document.createElement("button");
     clearAllButton.id = "clear-all-audio-button";
-    clearAllButton.textContent = "🧹";
-    clearAllButton.title = "Clear all";
+    clearAllButton.textContent = "× Clear all";
     clearAllButton.addEventListener("click", () => {
-      document.querySelectorAll(".audio-player-container").forEach((el) => {
+      document.querySelectorAll(".tts-player-host").forEach((el) => {
         if (el._cleanup) el._cleanup();
         el.remove();
       });
@@ -101,45 +246,22 @@ async function createAudioPlayer(base64Audio, gainIndex) {
     });
     document.body.appendChild(clearAllButton);
   }
-  clearAllButton.style.display = "block";
+  // Shadow host — sits in the real DOM for querying/positioning;
+  // the player lives inside its shadow so page CSS can't interfere.
+  const host = document.createElement("div");
+  host.classList.add("tts-player-host");
+  const shadow = host.attachShadow({ mode: "open" });
+  const styleEl = document.createElement("style");
+  styleEl.textContent = PLAYER_CSS;
+  shadow.appendChild(styleEl);
 
   const audioContainer = document.createElement("div");
   audioContainer.classList.add("audio-player-container");
-
-  // Delay button
-  const delayPlayButton = document.createElement("button");
-  delayPlayButton.textContent = "▶ Delay";
-  delayPlayButton.style.marginRight = "8px";
-  delayPlayButton.style.padding = "4px 10px";
-  delayPlayButton.style.border = "none";
-  delayPlayButton.style.backgroundColor = "#3498db";
-  delayPlayButton.style.color = "white";
-  delayPlayButton.style.borderRadius = "6px";
-  delayPlayButton.style.cursor = "pointer";
-  delayPlayButton.style.fontFamily = "sans-serif";
-  delayPlayButton.addEventListener("click", () => {
-    delayPlayButton.disabled = true;
-    setTimeout(() => {
-      if (!isPlaying) {
-        if (ended) pauseOffset = 0;
-        startSource(pauseOffset);
-        ended = false;
-        updatePlayButton();
-      }
-      delayPlayButton.disabled = false;
-    }, 2000);
-  });
+  shadow.appendChild(audioContainer);
 
   // Play/Pause button
   const playPauseBtn = document.createElement("button");
-  playPauseBtn.style.marginRight = "6px";
-  playPauseBtn.style.padding = "4px 10px";
-  playPauseBtn.style.border = "none";
-  playPauseBtn.style.backgroundColor = "#3498db";
-  playPauseBtn.style.color = "white";
-  playPauseBtn.style.borderRadius = "6px";
-  playPauseBtn.style.cursor = "pointer";
-  playPauseBtn.style.fontFamily = "sans-serif";
+  playPauseBtn.classList.add("player-btn");
 
   function updatePlayButton() {
     playPauseBtn.textContent = isPlaying ? "⏸" : ended ? "↺" : "▶";
@@ -161,22 +283,24 @@ async function createAudioPlayer(base64Audio, gainIndex) {
 
   // Progress bar
   const progressTrack = document.createElement("div");
-  progressTrack.style.width = "140px";
-  progressTrack.style.height = "6px";
-  progressTrack.style.backgroundColor = "rgba(255,255,255,0.3)";
-  progressTrack.style.borderRadius = "3px";
-  progressTrack.style.cursor = "pointer";
-  progressTrack.style.marginRight = "6px";
-  progressTrack.style.flexShrink = "0";
-  progressTrack.style.position = "relative";
+  progressTrack.classList.add("progress-track");
 
   const progressFill = document.createElement("div");
+  progressFill.classList.add("progress-fill");
   progressFill.style.width = "0%";
-  progressFill.style.height = "100%";
-  progressFill.style.backgroundColor = "#3498db";
-  progressFill.style.borderRadius = "3px";
-  progressFill.style.pointerEvents = "none";
+
+  const progressThumb = document.createElement("div");
+  progressThumb.classList.add("progress-thumb");
+  progressThumb.style.left = "0%";
+
   progressTrack.appendChild(progressFill);
+  progressTrack.appendChild(progressThumb);
+
+  function setProgress(fraction) {
+    const pct = `${fraction * 100}%`;
+    progressFill.style.width = pct;
+    progressThumb.style.left = pct;
+  }
 
   function getFraction(e) {
     const rect = progressTrack.getBoundingClientRect();
@@ -196,14 +320,16 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   progressTrack.addEventListener("mousedown", (e) => {
     e.preventDefault();
     isDragging = true;
-    progressFill.style.width = `${getFraction(e) * 100}%`;
+    progressTrack.classList.add("progress-track--dragging");
+    setProgress(getFraction(e));
 
     const onMouseMove = (e) => {
-      progressFill.style.width = `${getFraction(e) * 100}%`;
+      setProgress(getFraction(e));
     };
 
     const onMouseUp = (e) => {
       isDragging = false;
+      progressTrack.classList.remove("progress-track--dragging");
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
       seekToFraction(getFraction(e));
@@ -215,47 +341,70 @@ async function createAudioPlayer(base64Audio, gainIndex) {
 
   // Time display
   const timeDisplay = document.createElement("span");
-  timeDisplay.style.color = "white";
-  timeDisplay.style.fontFamily = "sans-serif";
-  timeDisplay.style.fontSize = "13px";
-  timeDisplay.style.marginRight = "8px";
-  timeDisplay.style.minWidth = "80px";
-  timeDisplay.style.display = "inline-block";
+  timeDisplay.classList.add("time-display");
 
   function updateTime() {
     const elapsed = getElapsed();
     timeDisplay.textContent = `${formatTime(elapsed)} / ${formatTime(duration)}`;
-    // Don't overwrite fill position while user is dragging
     if (!isDragging) {
-      progressFill.style.width = `${(elapsed / duration) * 100}%`;
+      setProgress(elapsed / duration);
     }
   }
+
+  function startTimer() {
+    if (timer) clearInterval(timer);
+    timer = setInterval(() => {
+      updateTime();
+      if (ended) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }, 250);
+  }
+
+  // Download button
+  const downloadButton = document.createElement("button");
+  downloadButton.textContent = "⬇";
+  downloadButton.title = "Download audio";
+  downloadButton.classList.add("player-btn");
+  downloadButton.addEventListener("click", () => {
+    // Rebuild bytes from base64: the Uint8Array passed to decodeAudioData gets
+    // detached. A blob: download URL isn't governed by media-src CSP, so this
+    // works even on strict sites like claude.ai.
+    const bin = atob(base64Audio);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([arr], { type: "audio/mpeg" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tts-${Date.now()}.mp3`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
 
   // Close button
   const closeButton = document.createElement("button");
   closeButton.innerHTML = "&times;";
   closeButton.classList.add("close-button");
   closeButton.addEventListener("click", () => {
-    audioContainer._cleanup();
-    audioContainer.remove();
+    host._cleanup();
+    host.remove();
     adjustAudioPositions();
   });
 
-  audioContainer.appendChild(delayPlayButton);
   audioContainer.appendChild(playPauseBtn);
   audioContainer.appendChild(progressTrack);
   audioContainer.appendChild(timeDisplay);
+  audioContainer.appendChild(downloadButton);
   audioContainer.appendChild(closeButton);
 
-  const existingPlayers = document.querySelectorAll(".audio-player-container");
-  const baseBottom = 10;
-  const spacing = 56;
-  audioContainer.style.bottom = `${baseBottom + existingPlayers.length * spacing}px`;
-  audioContainer.style.right = "10px";
-  document.body.appendChild(audioContainer);
-
-  // Position clear-all button to the left of the player stack based on actual width
-  clearAllButton.style.right = `${10 + audioContainer.offsetWidth + 8}px`;
+  host.style.position = "fixed";
+  host.style.right = "10px";
+  host.style.zIndex = "9999";
+  document.body.appendChild(host);
+  adjustAudioPositions();
 
   // Auto-play if no other media is playing
   const otherMediaPlaying = Array.from(document.querySelectorAll("audio, video"))
@@ -269,28 +418,12 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   updatePlayButton();
   updateTime();
 
-  const timer = setInterval(() => {
-    if (ended) {
-      clearInterval(timer);
-    } else {
-      updateTime();
-    }
-  }, 250);
-
-  // Store cleanup on the element so the clear-all button can call it
+  // Cleanup stored on the host so the clear-all button can call it
   // without needing a MutationObserver watching the entire page DOM.
-  audioContainer._cleanup = () => {
+  host._cleanup = () => {
     clearInterval(timer);
     if (source && isPlaying) source.stop();
     audioCtx.close();
   };
 
-  function adjustAudioPositions() {
-    const players = document.querySelectorAll(".audio-player-container");
-    players.forEach((player, index) => {
-      player.style.bottom = `${baseBottom + index * spacing}px`;
-    });
-    const btn = document.querySelector("#clear-all-audio-button");
-    if (btn) btn.style.display = players.length > 0 ? "block" : "none";
-  }
 }
