@@ -2,13 +2,13 @@
 
 A small [FastAPI](https://fastapi.tiangolo.com/) server that exposes the
 [Kokoro](https://github.com/hexgrad/kokoro) text-to-speech model over HTTP.
-Send it text, get back MP3 audio. Configured for **American English** only.
+Send it text, get audio streamed back as it is generated. Configured for
+**American English** only.
 
 ## Requirements
 
 - Python >= 3.12
 - [uv](https://docs.astral.sh/uv/)
-- `ffmpeg` (required by `pydub` to encode MP3)
 
 The Kokoro model weights are downloaded automatically by the `kokoro` package
 on first use.
@@ -26,15 +26,15 @@ uv run uvicorn server:app --host 0.0.0.0 --port 18001
 ```
 
 Port `18001` is what the companion kokoro-tts browser extension expects
-(`http://localhost:18001/tts`); change it only if you also update the
+(`http://localhost:18001/tts/stream`); change it only if you also update the
 extension.
 
-The model is loaded lazily on the **first** `/tts` request, so the first
-response is noticeably slower than the ones that follow.
+The model is loaded lazily on the **first** request, so the first response is
+noticeably slower than the ones that follow.
 
 ## API
 
-### `POST /tts`
+### `POST /tts/stream`
 
 Request body:
 
@@ -42,27 +42,14 @@ Request body:
 { "text": "Hello from Kokoro", "voice": "af_bella" }
 ```
 
-Response: an `audio/mp3` stream. An empty `text` or an unknown `voice` returns
-`400`.
+Streams audio as it is generated for low-latency playback of long text: an
+`application/x-ndjson` response with one JSON line per chunk —
+`{"sr": 24000, "index": i, "pcm_b64": "<base64 Int16 mono PCM>"}` — terminated
+by `{"done": true}`, or `{"error": "..."}` on mid-stream failure. An empty
+`text` or an unknown `voice` returns `400`.
 
 Available voices: `af_bella`, `af_heart`, `af_sarah`, `af_sky`, `am_echo`,
 `am_liam`, `am_michael`.
-
-Example:
-
-```bash
-curl -X POST http://localhost:18001/tts \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Hello from Kokoro", "voice": "af_bella"}' \
-  --output out.mp3
-```
-
-### `POST /tts/stream`
-
-Same request body as `/tts`. Streams audio as it is generated for low-latency
-playback of long text: an `application/x-ndjson` response with one JSON line
-per chunk — `{"sr": 24000, "index": i, "pcm_b64": "<base64 Int16 mono PCM>"}` —
-terminated by `{"done": true}`, or `{"error": "..."}` on mid-stream failure.
 
 ## Configuration
 

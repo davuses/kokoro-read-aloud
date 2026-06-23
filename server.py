@@ -1,19 +1,15 @@
 import asyncio
 import base64
-import io
 import json
 import logging
 import os
 import threading
 
 import numpy as np
-import soundfile as sf
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from pydub import AudioSegment
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,51 +40,9 @@ app.add_middleware(
 _inference_lock = asyncio.Lock()
 
 
-def _synthesize(text: str, voice: str) -> bytes:
-    """Run TTS and return MP3 bytes. Blocking; call via run_in_threadpool."""
-    from kokoro_model import SAMPLE_RATE, kokoro_model
-
-    audio_output = kokoro_model.generate_audio(text, voice=voice)
-
-    audio_io_wav = io.BytesIO()
-    sf.write(audio_io_wav, audio_output, SAMPLE_RATE, format="WAV")
-    audio_io_wav.seek(0)
-
-    audio = AudioSegment.from_wav(audio_io_wav)
-    mp3_io = io.BytesIO()
-    audio.export(mp3_io, format="mp3")
-    return mp3_io.getvalue()
-
-
 class TextRequest(BaseModel):
     text: str
     voice: str
-
-
-async def _tts_kokoro(text: str, voice: str) -> bytes:
-    # Importing kokoro_model is cheap (the model loads lazily on first use),
-    # so we can validate the voice and reject bad ones without loading it.
-    from kokoro_model import kokoro_model
-
-    if voice not in kokoro_model.ALLOWED_VOICES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown voice. Allowed: {kokoro_model.ALLOWED_VOICES}",
-        )
-
-    # Kokoro uses one shared GPU pipeline: serialize with the lock and run the
-    # blocking inference off the event loop.
-    async with _inference_lock:
-        return await run_in_threadpool(_synthesize, text, voice)
-
-
-@app.post("/tts")
-async def tts(request: TextRequest):
-    if not request.text:
-        raise HTTPException(status_code=400, detail="No text provided")
-
-    mp3_bytes = await _tts_kokoro(request.text, request.voice)
-    return StreamingResponse(io.BytesIO(mp3_bytes), media_type="audio/mp3")
 
 
 @app.post("/tts/stream")

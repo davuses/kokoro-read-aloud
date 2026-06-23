@@ -1,5 +1,4 @@
 import logging
-import time
 import warnings
 
 import numpy as np
@@ -30,7 +29,7 @@ class KokoroModel:
     def __init__(self, lang_code="a"):
         self.lang_code = lang_code
         # The pipeline (and the heavy torch/kokoro imports it needs) is loaded
-        # lazily on the first generate_audio call, not at import/startup.
+        # lazily on the first stream_audio call, not at import/startup.
         self.pipeline = None
 
     def _ensure_pipeline(self):
@@ -64,19 +63,6 @@ class KokoroModel:
             if audio is None:
                 continue
             yield np.asarray(audio, dtype=np.float32)
-
-    def generate_audio(
-        self, text: str, voice: str, speed=1, split_pattern=r"\n+"
-    ):
-        starttime = time.time()
-        # Reuse the streaming generator and concatenate for the buffered path.
-        audio_chunks = list(
-            self.stream_audio(text, voice, speed=speed, split_pattern=split_pattern)
-        )
-        logger.info(f"Time taken: {time.time() - starttime:.2f} seconds")
-        if not audio_chunks:
-            raise ValueError("Failed to generate audio")
-        return np.concatenate(audio_chunks)
 
 
 # Singleton instance of the model

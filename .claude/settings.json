@@ -18,7 +18,8 @@
     ],
     "additionalDirectories": [
       "/home/sakana/kokoro-tts-extension/src",
-      "/home/sakana/kokoro-tts-extension/public"
+      "/home/sakana/kokoro-tts-extension/public",
+      "/home/sakana/kokoro-tts-extension"
     ]
   }
 }
