@@ -12,6 +12,16 @@ function createMenus() {
     title: "Read an element aloud…",
     contexts: ["page"],
   });
+  api.contextMenus.create({
+    id: "ttsReadFromHere",
+    title: "Read from here to the end",
+    contexts: ["page", "selection"],
+  });
+  api.contextMenus.create({
+    id: "ttsReadArticle",
+    title: "Read main article aloud",
+    contexts: ["page"],
+  });
 }
 
 api.runtime.onInstalled.addListener(createMenus);
@@ -23,6 +33,12 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
   } else if (info.menuItemId === "ttsReadElement") {
     // Ask the page to enter element-picker mode; it sends back "tts_text".
     api.tabs.sendMessage(tab.id, { action: "enterPickMode" });
+  } else if (info.menuItemId === "ttsReadFromHere") {
+    // Read the right-clicked element and everything after it.
+    api.tabs.sendMessage(tab.id, { action: "readFromHere" });
+  } else if (info.menuItemId === "ttsReadArticle") {
+    // Detect and read the page's main article content.
+    api.tabs.sendMessage(tab.id, { action: "readArticle" });
   }
 });
 

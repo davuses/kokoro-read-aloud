@@ -252,7 +252,10 @@ function createProgressBar(onSeek, canSeek = () => true) {
 
 api.runtime.onConnect.addListener((port) => {
   if (port.name !== "tts-stream") return;
-  createStreamingPlayer(port);
+  // Hand the streaming player the source DOM (if any) so it can highlight along.
+  const source = pendingReadSource;
+  pendingReadSource = null;
+  createStreamingPlayer(port, source);
 });
 
 api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -270,8 +273,118 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   } else if (message.action === "enterPickMode") {
     startElementPicker();
+  } else if (message.action === "readFromHere") {
+    readFromHere();
+  } else if (message.action === "readArticle") {
+    readArticle();
   }
 });
+
+// Track the element under the last right-click so "Read from here to the end"
+// has an anchor without a separate picking step.
+let lastContextElement = null;
+document.addEventListener(
+  "contextmenu",
+  (e) => {
+    lastContextElement = e.target;
+  },
+  true
+);
+
+// Block-level, text-bearing elements treated as paragraphs for reading.
+const READABLE_BLOCK_SELECTOR =
+  "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, dd, figcaption, td";
+
+function readableBlocks(container) {
+  return Array.from(
+    container.querySelectorAll(READABLE_BLOCK_SELECTOR)
+  ).filter((el) => {
+    if (el.closest(".tts-player-host")) return false;
+    const text = (el.innerText || "").trim();
+    if (text.length < 2) return false;
+    // Skip hidden/detached elements; offscreen-below-the-fold is fine.
+    if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") {
+      return false;
+    }
+    return true;
+  });
+}
+
+// A reading "session": the source roots the streaming player highlights against.
+// Stashed right before asking the background to synthesize; the streaming port
+// picks it up when it opens. Cleared after a few seconds if nothing consumes it
+// (e.g. when the selected engine is Google Translate, which doesn't stream).
+let pendingReadSource = null;
+
+function startReading(roots) {
+  roots = (roots || []).filter(Boolean);
+  const text = roots
+    .map((r) => r.innerText || "")
+    .join("\n\n")
+    .trim();
+  if (!text) return;
+  const src = { roots };
+  pendingReadSource = src;
+  setTimeout(() => {
+    if (pendingReadSource === src) pendingReadSource = null;
+  }, 8000);
+  api.runtime.sendMessage({ action: "tts_text", text });
+}
+
+function readFromHere() {
+  const start = lastContextElement;
+  if (!start) return;
+  const blocks = readableBlocks(document.body);
+  const idx = blocks.findIndex(
+    (b) =>
+      b === start ||
+      b.contains(start) ||
+      (start.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+  );
+  if (idx < 0) {
+    // Nothing recognised at/after the click — fall back to the clicked block.
+    startReading([start.closest(READABLE_BLOCK_SELECTOR) || start]);
+    return;
+  }
+  startReading(blocks.slice(idx));
+}
+
+function readArticle() {
+  startReading([findMainArticle()]);
+}
+
+// Best-effort main-content detection: prefer a semantic container, else the
+// ancestor holding the most paragraph text. Lighter (and less robust) than a
+// full Readability pass — good enough for typical article pages.
+function findMainArticle() {
+  const semantic = document.querySelector("article, main, [role='main']");
+  if (semantic && (semantic.innerText || "").trim().length > 200) {
+    return semantic;
+  }
+  const paras = Array.from(document.querySelectorAll("p")).filter(
+    (p) => (p.innerText || "").trim().length > 40
+  );
+  const scores = new Map();
+  for (const p of paras) {
+    const len = p.innerText.trim().length;
+    let el = p.parentElement;
+    let depth = 0;
+    while (el && el !== document.body && depth < 4) {
+      scores.set(el, (scores.get(el) || 0) + len);
+      el = el.parentElement;
+      depth++;
+    }
+  }
+  let best = null;
+  let bestScore = 0;
+  for (const [el, score] of scores) {
+    if (score > bestScore) {
+      bestScore = score;
+      best = el;
+    }
+  }
+  return best || document.body;
+}
 
 // On-demand element picker: hover to outline an element, ↑/↓ to grow/shrink the
 // selection up/down the DOM tree, click (or Enter) to read everything inside it,
@@ -404,9 +517,7 @@ function startElementPicker() {
   function pick() {
     const el = current;
     stop();
-    if (!el) return;
-    const text = (el.innerText || el.textContent || "").trim();
-    if (text) api.runtime.sendMessage({ action: "tts_text", text });
+    if (el) startReading([el]);
   }
 
   function stop() {
@@ -603,7 +714,7 @@ async function createAudioPlayer(base64Audio) {
 // Plays them gaplessly with a rolling-window scheduler (only ~1s scheduled
 // ahead) so pause/seek stay simple, and starts on the first chunk (~1s) instead
 // of waiting for the whole narration.
-function createStreamingPlayer(port) {
+function createStreamingPlayer(port, source) {
   // Attach the message handler synchronously so no early chunks are missed.
   const pending = [];
   let onPortMessage = (msg) => pending.push(msg);
@@ -612,6 +723,10 @@ function createStreamingPlayer(port) {
   const { host, audioContainer } = createPlayerShell();
 
   const audioCtx = new AudioContext();
+
+  // Sentence-level highlighter over the source DOM (null if no source or the
+  // CSS Custom Highlight API is unavailable). Audio still plays without it.
+  const karaoke = source ? createKaraoke(source.roots) : null;
 
   const LOOKAHEAD = 1.0; // seconds of audio scheduled ahead of the playhead
   const chunks = []; // { buffer, start } cumulative timeline
@@ -721,6 +836,7 @@ function createStreamingPlayer(port) {
     if (!progress.isDragging() && totalDuration > 0) {
       progress.setProgress(position() / totalDuration);
     }
+    if (karaoke) karaoke.update(position(), finished);
   }
 
   // Disabled until generation finishes, so a download can't capture a
@@ -759,14 +875,16 @@ function createStreamingPlayer(port) {
   pumpTimer = setInterval(pump, 150);
 
   // --- incoming chunks ---
-  function addChunk(sr, int16) {
+  function addChunk(sr, int16, text) {
     sampleRate = sr;
     const buffer = audioCtx.createBuffer(1, int16.length, sr);
     const ch = buffer.getChannelData(0);
     for (let i = 0; i < int16.length; i++) ch[i] = int16[i] / 32768;
+    const tStart = totalDuration;
     chunks.push({ buffer, start: totalDuration });
     pcmParts.push(int16);
     totalDuration += buffer.duration;
+    if (karaoke && text) karaoke.addChunk(tStart, buffer.duration, text);
 
     // Auto-start on the first chunk if nothing else is playing on the page.
     if (chunks.length === 1) {
@@ -791,7 +909,7 @@ function createStreamingPlayer(port) {
       const bin = atob(msg.pcm_b64);
       const u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      addChunk(msg.sr, new Int16Array(u8.buffer));
+      addChunk(msg.sr, new Int16Array(u8.buffer), msg.text);
     } else if (msg.type === "end") {
       receivedEnd = true;
       allowDownload();
@@ -813,9 +931,131 @@ function createStreamingPlayer(port) {
     clearInterval(uiTimer);
     clearInterval(pumpTimer);
     stopActiveSources();
+    if (karaoke) karaoke.clear();
     audioCtx.close();
     try { port.disconnect(); } catch (e) { /* already gone */ }
   };
+}
+
+// Sentence-level karaoke highlighter using the CSS Custom Highlight API, which
+// paints ranges without mutating the DOM (no wrapping <mark> to break page JS).
+// Returns null if the API is unavailable or there is no source to highlight.
+//
+// Alignment: the server tags each audio chunk with its grapheme text. We split
+// that text into sentences and split the chunk's audio duration across them by
+// character length, so each chunk re-anchors the timeline and drift stays
+// bounded to within a single chunk. Each sentence's words are matched (forward,
+// normalized to letters/digits so whitespace and punctuation differences don't
+// matter) against a token index of the source's text nodes to build its range.
+function createKaraoke(roots) {
+  roots = (roots || []).filter(Boolean);
+  if (
+    typeof CSS === "undefined" ||
+    !CSS.highlights ||
+    typeof Highlight === "undefined" ||
+    !roots.length
+  ) {
+    return null;
+  }
+
+  ensureHighlightStyle();
+  const highlight = new Highlight();
+  CSS.highlights.set("tts-reading", highlight);
+
+  // Normalize a raw whitespace-delimited token to comparable letters/digits.
+  const norm = (tok) => tok.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+  // Flat, in-reading-order word index, each entry carrying its DOM position.
+  const tokens = [];
+  for (const root of roots) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.parentElement && node.parentElement.closest(".tts-player-host")) {
+        continue;
+      }
+      const value = node.nodeValue;
+      const re = /\S+/g;
+      let m;
+      while ((m = re.exec(value))) {
+        const w = norm(m[0]);
+        if (w) tokens.push({ w, node, start: m.index, end: m.index + m[0].length });
+      }
+    }
+  }
+
+  let cursor = 0; // tokens before this are already consumed by earlier sentences
+  function rangeForWords(words) {
+    if (!words.length) return null;
+    for (let i = cursor; i <= tokens.length - words.length; i++) {
+      let k = 0;
+      while (k < words.length && tokens[i + k].w === words[k]) k++;
+      if (k === words.length) {
+        const a = tokens[i];
+        const b = tokens[i + words.length - 1];
+        const range = document.createRange();
+        range.setStart(a.node, a.start);
+        range.setEnd(b.node, b.end);
+        cursor = i + words.length;
+        return range;
+      }
+    }
+    return null;
+  }
+
+  function splitSentences(text) {
+    const clean = text.replace(/\s+/g, " ").trim();
+    if (!clean) return [];
+    return clean.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/).filter(Boolean);
+  }
+
+  const segments = []; // { tStart, tEnd, range } ordered by time
+  let currentSeg = null;
+
+  return {
+    addChunk(tStart, duration, text) {
+      const sentences = splitSentences(text);
+      const totalLen = sentences.reduce((a, s) => a + s.length, 0) || 1;
+      let cum = 0;
+      for (const sentence of sentences) {
+        const segStart = tStart + (cum / totalLen) * duration;
+        cum += sentence.length;
+        const segEnd = tStart + (cum / totalLen) * duration;
+        const words = sentence.split(/\s+/).map(norm).filter(Boolean);
+        segments.push({ tStart: segStart, tEnd: segEnd, range: rangeForWords(words) });
+      }
+    },
+    update(pos) {
+      let seg = null;
+      for (const s of segments) {
+        if (pos >= s.tStart && pos < s.tEnd) {
+          seg = s;
+          break;
+        }
+      }
+      if (seg === currentSeg) return;
+      currentSeg = seg;
+      highlight.clear();
+      if (seg && seg.range) highlight.add(seg.range);
+    },
+    clear() {
+      highlight.clear();
+      try {
+        CSS.highlights.delete("tts-reading");
+      } catch (e) {
+        /* ignore */
+      }
+    },
+  };
+}
+
+function ensureHighlightStyle() {
+  if (document.getElementById("tts-highlight-style")) return;
+  const s = document.createElement("style");
+  s.id = "tts-highlight-style";
+  s.textContent =
+    "::highlight(tts-reading){background-color:rgba(99,102,241,0.35);color:inherit;}";
+  document.head.appendChild(s);
 }
 
 // Build a minimal 16-bit mono WAV blob from Int16 PCM samples.
