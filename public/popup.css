@@ -75,20 +75,6 @@ body {
   .save-btn:focus {
     outline: none;
   }
-  .slider-container {
-    margin-top: 16px;
-  }
-  .slider-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 13px;
-    margin-top: 4px;
-    font-family: sans-serif;
-  }
-  #gain-slider {
-    width: 100%;
-  }
-
   .server-status {
     font-size: 12px;
     margin-top: 6px;

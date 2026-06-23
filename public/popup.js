@@ -2,7 +2,6 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 
 document.addEventListener("DOMContentLoaded", () => {
   const ttsSelect = document.getElementById("tts-select");
-  const gainSlider = document.getElementById("gain-slider");
   const streamingToggle = document.getElementById("streaming-toggle");
 
   api.storage.sync.get("ttsEngine", (data) => {
@@ -30,14 +29,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const next = Math.max(0, Math.min(ttsSelect.options.length - 1, ttsSelect.selectedIndex + (e.deltaY > 0 ? 1 : -1)));
     ttsSelect.selectedIndex = next;
     ttsSelect.dispatchEvent(new Event("change"));
-  });
-
-  api.storage.sync.get(["volumeBoostIndex"], (result) => {
-    if (result.volumeBoostIndex !== undefined) gainSlider.value = result.volumeBoostIndex;
-  });
-
-  gainSlider.addEventListener("input", () => {
-    api.storage.sync.set({ volumeBoostIndex: parseInt(gainSlider.value, 10) });
   });
 });
 

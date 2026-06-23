@@ -180,9 +180,6 @@ function createPlayerShell() {
   return { host, audioContainer };
 }
 
-// Volume-boost multipliers, indexed by the popup's gain slider.
-const GAIN_LEVELS = [1.0, 1.25, 1.5, 1.75, 2.0];
-
 function formatTime(s) {
   const m = Math.floor(s / 60);
   return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
@@ -262,9 +259,7 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === "tts_kokoro" || message.action === "tts_google_translate") {
     const base64Audio = message.audioBase64;
     if (base64Audio) {
-      api.storage.sync.get(["volumeBoostIndex"], (result) => {
-        createAudioPlayer(base64Audio, result.volumeBoostIndex ?? 0);
-      });
+      createAudioPlayer(base64Audio);
     } else {
       console.error("No audio data received");
     }
@@ -276,7 +271,7 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-async function createAudioPlayer(base64Audio, gainIndex) {
+async function createAudioPlayer(base64Audio) {
   const binaryString = atob(base64Audio);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
@@ -284,9 +279,6 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   }
 
   const audioCtx = new AudioContext();
-  const gainNode = audioCtx.createGain();
-  gainNode.gain.value = GAIN_LEVELS[gainIndex] ?? 1.0;
-  gainNode.connect(audioCtx.destination);
 
   let audioBuffer;
   try {
@@ -313,7 +305,7 @@ async function createAudioPlayer(base64Audio, gainIndex) {
   function startSource(offset) {
     const thisSource = audioCtx.createBufferSource();
     thisSource.buffer = audioBuffer;
-    thisSource.connect(gainNode);
+    thisSource.connect(audioCtx.destination);
     thisSource.start(0, offset);
     startedAt = audioCtx.currentTime - offset;
     isPlaying = true;
@@ -456,11 +448,6 @@ function createStreamingPlayer(port) {
   const { host, audioContainer } = createPlayerShell();
 
   const audioCtx = new AudioContext();
-  const gainNode = audioCtx.createGain();
-  gainNode.connect(audioCtx.destination);
-  api.storage.sync.get(["volumeBoostIndex"], (r) => {
-    gainNode.gain.value = GAIN_LEVELS[r.volumeBoostIndex ?? 0] ?? 1.0;
-  });
 
   const LOOKAHEAD = 1.0; // seconds of audio scheduled ahead of the playhead
   const chunks = []; // { buffer, start } cumulative timeline
@@ -509,7 +496,7 @@ function createStreamingPlayer(port) {
       const whenCtx = startCtxTime + (scheduledUntil - startOffset);
       const src = audioCtx.createBufferSource();
       src.buffer = chunks[i].buffer;
-      src.connect(gainNode);
+      src.connect(audioCtx.destination);
       src.start(Math.max(whenCtx, audioCtx.currentTime), Math.max(0, intoBuffer));
       activeSources.push(src);
       src.onended = () => {
