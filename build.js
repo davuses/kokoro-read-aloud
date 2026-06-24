@@ -24,7 +24,11 @@ if (fs.existsSync(overridePath)) {
 
 const finalManifest = merge(baseManifest, overrideManifest);
 if (isFirefox) {
+  // Firefox uses MV2: drop the MV3 `action` key (replaced by `browser_action`
+  // from the override) and replace `background` wholesale so the merge doesn't
+  // leave the MV3 `service_worker`/`type` keys alongside the MV2 `scripts`.
   delete finalManifest.action;
+  finalManifest.background = overrideManifest.background;
 }
 fs.writeFileSync(
   path.join(distDir, "manifest.json"),

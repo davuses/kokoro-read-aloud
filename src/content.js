@@ -252,11 +252,29 @@ function createProgressBar(onSeek, canSeek = () => true) {
 
 api.runtime.onConnect.addListener((port) => {
   if (port.name !== "tts-stream") return;
-  // Hand the streaming player the source DOM (if any) so it can highlight along.
-  const source = pendingReadSource;
+  // Hand the streaming player the source DOM (if any) so it can highlight along:
+  // an explicit page-reading source, else the live text selection.
+  const source = pendingReadSource || captureSelectionSource();
   pendingReadSource = null;
   createStreamingPlayer(port, source);
 });
+
+// When TTS is triggered on a normal text selection no page-reading source was
+// stashed. Build a highlight source from the live selection's range, then clear
+// the native selection so its blue highlight doesn't fight the karaoke one.
+function captureSelectionSource() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0).cloneRange();
+  const container = range.commonAncestorContainer;
+  const rootEl =
+    container.nodeType === Node.ELEMENT_NODE
+      ? container
+      : container.parentElement;
+  if (!rootEl || rootEl.closest(".tts-player-host")) return null;
+  sel.removeAllRanges();
+  return { roots: [rootEl], range };
+}
 
 api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === "tts_google_translate") {
@@ -726,7 +744,7 @@ function createStreamingPlayer(port, source) {
 
   // Sentence-level highlighter over the source DOM (null if no source or the
   // CSS Custom Highlight API is unavailable). Audio still plays without it.
-  const karaoke = source ? createKaraoke(source.roots) : null;
+  const karaoke = source ? createKaraoke(source.roots, source.range) : null;
 
   const LOOKAHEAD = 1.0; // seconds of audio scheduled ahead of the playhead
   const chunks = []; // { buffer, start } cumulative timeline
@@ -947,7 +965,7 @@ function createStreamingPlayer(port, source) {
 // bounded to within a single chunk. Each sentence's words are matched (forward,
 // normalized to letters/digits so whitespace and punctuation differences don't
 // matter) against a token index of the source's text nodes to build its range.
-function createKaraoke(roots) {
+function createKaraoke(roots, range) {
   roots = (roots || []).filter(Boolean);
   if (
     typeof CSS === "undefined" ||
@@ -966,6 +984,8 @@ function createKaraoke(roots) {
   const norm = (tok) => tok.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
   // Flat, in-reading-order word index, each entry carrying its DOM position.
+  // When a range is given (text-selection reads) only words fully inside it are
+  // indexed, so matching can't anchor on identical words just outside it.
   const tokens = [];
   for (const root of roots) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -974,10 +994,19 @@ function createKaraoke(roots) {
       if (node.parentElement && node.parentElement.closest(".tts-player-host")) {
         continue;
       }
+      if (range && !range.intersectsNode(node)) continue;
+      // Clip to the selected slice when this node holds a range boundary.
+      let from = 0;
+      let to = node.nodeValue.length;
+      if (range) {
+        if (node === range.startContainer) from = range.startOffset;
+        if (node === range.endContainer) to = range.endOffset;
+      }
       const value = node.nodeValue;
       const re = /\S+/g;
       let m;
       while ((m = re.exec(value))) {
+        if (m.index < from || m.index + m[0].length > to) continue;
         const w = norm(m[0]);
         if (w) tokens.push({ w, node, start: m.index, end: m.index + m[0].length });
       }

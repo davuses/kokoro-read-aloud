@@ -1,6 +1,8 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 
-const KOKORO_SERVER = "http://localhost:18001";
+// Default Kokoro server. The real URL is stored in storage.sync (editable in
+// the popup and shared with the background script); this is only the fallback.
+const DEFAULT_SERVER_URL = "http://localhost:18001";
 
 // Fallback used only when the server is unreachable, so the dropdown still
 // renders (and a previously selected voice still displays) while offline. The
@@ -10,10 +12,22 @@ const FALLBACK_VOICES = [
   "am_echo", "am_liam", "am_michael",
 ];
 
+function getServerUrl() {
+  return new Promise((resolve) => {
+    api.storage.sync.get("serverUrl", (data) => {
+      resolve((data.serverUrl || DEFAULT_SERVER_URL).replace(/\/+$/, ""));
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const ttsSelect = document.getElementById("tts-select");
+  const serverUrlInput = document.getElementById("server-url");
 
-  const voices = await fetchVoices();
+  const serverUrl = await getServerUrl();
+  serverUrlInput.value = serverUrl;
+
+  const voices = await fetchVoices(serverUrl);
   populateVoices(ttsSelect, voices);
 
   api.storage.sync.get("ttsEngine", (data) => {
@@ -33,6 +47,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateServerStatus();
   });
 
+  // Persist the server URL on edit, then re-fetch voices and re-check status
+  // against the new address.
+  const applyServerUrl = async () => {
+    const url = serverUrlInput.value.trim().replace(/\/+$/, "");
+    api.storage.sync.set({ serverUrl: url || DEFAULT_SERVER_URL });
+    const fresh = await fetchVoices(url || DEFAULT_SERVER_URL);
+    const current = ttsSelect.value;
+    populateVoices(ttsSelect, fresh);
+    if (current.startsWith("kokoro_") && !optionExists(ttsSelect, current)) {
+      addVoiceOption(ttsSelect, current.slice("kokoro_".length));
+    }
+    ttsSelect.value = current;
+    updateServerStatus();
+  };
+  serverUrlInput.addEventListener("change", applyServerUrl);
+
   const pickBtn = document.getElementById("pick-element-btn");
   pickBtn.addEventListener("click", async () => {
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
@@ -50,9 +80,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 });
 
-async function fetchVoices() {
+async function fetchVoices(serverUrl) {
   try {
-    const resp = await fetch(`${KOKORO_SERVER}/voices`, {
+    const resp = await fetch(`${serverUrl}/voices`, {
       signal: AbortSignal.timeout(1500),
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -85,16 +115,25 @@ function populateVoices(select, voices) {
 function updateServerStatus() {
   const ttsSelect = document.getElementById("tts-select");
   const indicator = document.getElementById("server-status");
+  const urlRow = document.getElementById("server-url-row");
   const isKokoro = ttsSelect.value.startsWith("kokoro");
   indicator.style.display = isKokoro ? "block" : "none";
+  // Only show the server URL field when a Kokoro voice is selected.
+  urlRow.style.display = isKokoro ? "block" : "none";
   if (isKokoro) pingServer(indicator);
 }
 
 async function pingServer(indicator) {
   indicator.textContent = "● Checking…";
   indicator.className = "server-status checking";
+  const serverUrl = await getServerUrl();
   try {
-    await fetch(`${KOKORO_SERVER}/`, { signal: AbortSignal.timeout(1500) });
+    // /voices is a real, cheap health signal (it doesn't load the model), so a
+    // 2xx here means the server is genuinely up — unlike pinging "/", which 404s.
+    const resp = await fetch(`${serverUrl}/voices`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     indicator.textContent = "● Server online";
     indicator.className = "server-status online";
   } catch {

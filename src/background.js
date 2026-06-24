@@ -1,6 +1,18 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 const actionApi = api.action ?? api.browserAction;
 
+// Where the Kokoro server lives. Configurable from the popup and persisted in
+// storage.sync; this constant is only the fallback when nothing is stored.
+const DEFAULT_SERVER_URL = "http://localhost:18001";
+
+function getServerUrl() {
+  return new Promise((resolve) => {
+    api.storage.sync.get("serverUrl", (data) => {
+      resolve((data.serverUrl || DEFAULT_SERVER_URL).replace(/\/+$/, ""));
+    });
+  });
+}
+
 function createMenus() {
   api.contextMenus.create({
     id: "ttsWithKokoro",
@@ -116,7 +128,8 @@ async function streamKokoro(text, voice, tabId) {
   actionApi?.setBadgeBackgroundColor({ color: "#3b82f6", tabId });
 
   try {
-    const response = await fetch("http://localhost:18001/tts/stream", {
+    const serverUrl = await getServerUrl();
+    const response = await fetch(`${serverUrl}/tts/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, voice }),
@@ -153,7 +166,8 @@ async function streamKokoro(text, voice, tabId) {
           continue;
         }
         if (obj.pcm_b64) {
-          port.postMessage({ type: "chunk", sr: obj.sr, pcm_b64: obj.pcm_b64 });
+          // Forward the grapheme text too — the player aligns highlighting to it.
+          port.postMessage({ type: "chunk", sr: obj.sr, pcm_b64: obj.pcm_b64, text: obj.text });
         } else if (obj.error) {
           port.postMessage({ type: "error", message: obj.error });
         } else if (obj.done) {
@@ -175,7 +189,7 @@ async function streamKokoro(text, voice, tabId) {
       type: "basic",
       iconUrl: "icons/icon128.png",
       title: "TTS Server Error",
-      message: `${error.message}. Make sure the server is running at port 18001.`,
+      message: `${error.message}. Make sure the kokoro-server is running and the URL in the popup is correct.`,
     });
     try { port.disconnect(); } catch (e) { /* page gone */ }
   }
