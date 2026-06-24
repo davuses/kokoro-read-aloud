@@ -14,7 +14,12 @@
       "Bash(git commit *)",
       "Bash(python -m py_compile kokoro_model.py server.py)",
       "Bash(node --check public/popup.js)",
-      "Bash(uv add *)"
+      "Bash(uv add *)",
+      "Bash(node -e \"const m=require\\('./dist-firefox/manifest.json'\\); console.log\\(JSON.stringify\\({manifest_version:m.manifest_version, background:m.background, action:m.action, browser_action:m.browser_action},null,2\\)\\);\")",
+      "Bash(ls LICENSE*)",
+      "Bash(cat .gitignore)",
+      "Bash(git -C /home/sakana/python/kokoro-server diff .claude/settings.json)",
+      "Bash(git -C /home/sakana/python/kokoro-server diff --stat uv.lock)"
     ],
     "additionalDirectories": [
       "/home/sakana/kokoro-tts-extension/src",
