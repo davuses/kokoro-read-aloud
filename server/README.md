@@ -5,9 +5,9 @@ A small [FastAPI](https://fastapi.tiangolo.com/) server that exposes the
 Send it text, get audio streamed back as it is generated. Configured for
 **American English** only.
 
-It pairs with the companion browser extension,
-[kokoro-tts-extension](../kokoro-tts-extension), which streams from this server
-(default `http://localhost:18001`) — but the HTTP API is usable on its own.
+It pairs with the companion [browser extension](../extension), which streams from
+this server (default `http://localhost:18001`) — but the HTTP API is usable on
+its own.
 
 ## Requirements
 
@@ -134,4 +134,4 @@ tokens = phonemize(
 
 ## License
 
-[Apache-2.0](LICENSE). The Kokoro model itself is also Apache-2.0.
+[Apache-2.0](../LICENSE). The Kokoro model itself is also Apache-2.0.

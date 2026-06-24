@@ -4,13 +4,13 @@ A cross-browser (Chrome/MV3 and Firefox/MV2) extension that reads web text aloud
 It has two engines:
 
 - **Kokoro** — high-quality neural TTS, streamed from your own local
-  [kokoro-server](../kokoro-server). Low latency on long text and a karaoke-style
+  [kokoro-server](../server). Low latency on long text and a karaoke-style
   highlight that follows along as it reads.
 - **Google Translate** — a zero-setup fallback that fetches audio directly from
   Google's public translate TTS endpoint (no local server needed).
 
 > **Kokoro requires the companion server.** Install and run
-> [kokoro-server](../kokoro-server) first; by default the extension talks to it at
+> [kokoro-server](../server) first; by default the extension talks to it at
 > `http://localhost:18001` (configurable in the popup). Google Translate works
 > without it.
 
@@ -55,7 +55,7 @@ This extension is distributed as an unpacked build — it is not on any store.
 
 ## Usage
 
-1. Start [kokoro-server](../kokoro-server) (for the Kokoro engine).
+1. Start [kokoro-server](../server) (for the Kokoro engine).
 2. Click the toolbar icon and pick an engine/voice. When a Kokoro voice is
    selected, a status line shows whether the server is reachable, and a
    **Kokoro server URL** field lets you point at a non-default address.
@@ -79,4 +79,4 @@ local settings.
 
 ## License
 
-[Apache-2.0](LICENSE).
+[Apache-2.0](../LICENSE).
