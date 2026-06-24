@@ -143,6 +143,16 @@ function adjustAudioPositions() {
   }
 }
 
+// Registry of on-screen players so a newly started one can pause the others.
+// They play through the Web Audio API (not <audio> elements), so the browser
+// won't pause them for us — without this, stacked players talk over each other.
+const activePlayers = new Set();
+function pauseOtherPlayers(except) {
+  for (const player of activePlayers) {
+    if (player !== except) player.pause();
+  }
+}
+
 function ensureClearAllButton() {
   let btn = document.querySelector("#clear-all-audio-button");
   if (!btn) {
@@ -183,6 +193,14 @@ function createPlayerShell() {
 function formatTime(s) {
   const m = Math.floor(s / 60);
   return `${m}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
+}
+
+// Decode a base64 string to a Uint8Array of its bytes.
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
 }
 
 function makePlayerButton(text, title) {
@@ -565,11 +583,7 @@ function startElementPicker() {
 }
 
 async function createAudioPlayer(base64Audio) {
-  const binaryString = atob(base64Audio);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
+  const bytes = base64ToBytes(base64Audio);
 
   const audioCtx = new AudioContext();
 
@@ -595,7 +609,16 @@ async function createAudioPlayer(base64Audio) {
     return Math.min(audioCtx.currentTime - startedAt, duration);
   }
 
+  function pause() {
+    if (!isPlaying) return;
+    pauseOffset = getElapsed();
+    source._stopManually();
+    isPlaying = false;
+    updatePlayButton();
+  }
+
   function startSource(offset) {
+    pauseOtherPlayers(self); // taking over playback; quiet the others
     const thisSource = audioCtx.createBufferSource();
     thisSource.buffer = audioBuffer;
     thisSource.connect(audioCtx.destination);
@@ -634,10 +657,7 @@ async function createAudioPlayer(base64Audio) {
 
   playPauseBtn.addEventListener("click", () => {
     if (isPlaying) {
-      pauseOffset = getElapsed();
-      source._stopManually();
-      isPlaying = false;
-      updatePlayButton();
+      pause();
     } else {
       if (ended) pauseOffset = 0;
       startSource(pauseOffset);
@@ -682,9 +702,7 @@ async function createAudioPlayer(base64Audio) {
     // Rebuild bytes from base64: the Uint8Array passed to decodeAudioData gets
     // detached. A blob: download URL isn't governed by media-src CSP, so this
     // works even on strict sites like claude.ai.
-    const bin = atob(base64Audio);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const arr = base64ToBytes(base64Audio);
     const url = URL.createObjectURL(new Blob([arr], { type: "audio/mpeg" }));
     const a = document.createElement("a");
     a.href = url;
@@ -706,7 +724,11 @@ async function createAudioPlayer(base64Audio) {
   document.body.appendChild(host);
   adjustAudioPositions();
 
-  // Auto-play if no other media is playing
+  const self = { pause };
+  activePlayers.add(self);
+
+  // Auto-play if no other page media is playing (startSource pauses sibling
+  // TTS players itself).
   const otherMediaPlaying = Array.from(document.querySelectorAll("audio, video"))
     .some((el) => !el.paused && !el.ended && el.readyState > 2);
 
@@ -721,6 +743,7 @@ async function createAudioPlayer(base64Audio) {
   // Cleanup stored on the host so the clear-all button can call it
   // without needing a MutationObserver watching the entire page DOM.
   host._cleanup = () => {
+    activePlayers.delete(self);
     clearInterval(timer);
     if (source && isPlaying) source.stop();
     audioCtx.close();
@@ -812,6 +835,7 @@ function createStreamingPlayer(port, source) {
   }
 
   function play(fromOffset) {
+    pauseOtherPlayers(self); // taking over playback; quiet the others
     stopActiveSources();
     startOffset = Math.max(0, Math.min(fromOffset, totalDuration));
     startCtxTime = audioCtx.currentTime;
@@ -829,6 +853,9 @@ function createStreamingPlayer(port, source) {
     isPlaying = false;
     updatePlayButton();
   }
+
+  const self = { pause };
+  activePlayers.add(self);
 
   // --- UI (shares the same chrome as the buffered player) ---
   const playPauseBtn = makePlayerButton();
@@ -924,9 +951,7 @@ function createStreamingPlayer(port, source) {
 
   function handleMessage(msg) {
     if (msg.type === "chunk") {
-      const bin = atob(msg.pcm_b64);
-      const u8 = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const u8 = base64ToBytes(msg.pcm_b64);
       addChunk(msg.sr, new Int16Array(u8.buffer), msg.text);
     } else if (msg.type === "end") {
       receivedEnd = true;
@@ -946,6 +971,7 @@ function createStreamingPlayer(port, source) {
   port.onDisconnect.addListener(() => { receivedEnd = true; allowDownload(); });
 
   host._cleanup = () => {
+    activePlayers.delete(self);
     clearInterval(uiTimer);
     clearInterval(pumpTimer);
     stopActiveSources();

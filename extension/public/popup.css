@@ -68,6 +68,12 @@ body {
     border-color: #0078d4;
     outline: none;
   }
+
+  .speed-range {
+    padding: 0;
+    accent-color: #0078d4;
+    cursor: pointer;
+  }
   
   /* Button styling */
   .save-btn {

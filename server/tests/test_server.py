@@ -65,6 +65,63 @@ def test_stream_emits_ndjson_chunks_then_done(monkeypatch):
         assert chunk["text"] == f"Sentence {i}."
 
 
+def test_stream_passes_speed_to_model(monkeypatch):
+    seen = {}
+
+    def fake_stream(text, voice, speed=1.0, **kwargs):
+        seen["speed"] = speed
+        yield "Hi.", np.zeros(240, dtype=np.float32)
+
+    monkeypatch.setattr(kokoro_model.kokoro_model, "stream_audio", fake_stream)
+
+    resp = client.post(
+        "/tts/stream",
+        json={"text": "hello", "voice": "af_bella", "speed": 1.5},
+    )
+    assert resp.status_code == 200
+    assert seen["speed"] == 1.5
+
+
+def test_stream_defaults_speed_when_omitted(monkeypatch):
+    seen = {}
+
+    def fake_stream(text, voice, speed=1.0, **kwargs):
+        seen["speed"] = speed
+        yield "Hi.", np.zeros(240, dtype=np.float32)
+
+    monkeypatch.setattr(kokoro_model.kokoro_model, "stream_audio", fake_stream)
+
+    resp = client.post("/tts/stream", json={"text": "hello", "voice": "af_bella"})
+    assert resp.status_code == 200
+    assert seen["speed"] == 1.0
+
+
+def test_stream_rejects_out_of_range_speed():
+    resp = client.post(
+        "/tts/stream",
+        json={"text": "hello", "voice": "af_bella", "speed": 5.0},
+    )
+    assert resp.status_code == 422
+
+
+def test_preload_builds_a_pipeline_per_lang_code(monkeypatch):
+    built = []
+    monkeypatch.setattr(
+        kokoro_model.kokoro_model,
+        "_ensure_pipeline",
+        lambda lang_code: built.append(lang_code),
+    )
+    kokoro_model.kokoro_model.preload()
+    # Both the American ("a") and British ("b") pipelines are warmed.
+    assert set(built) == {"a", "b"}
+
+
+def test_voices_includes_british_voices():
+    voices = client.get("/voices").json()["voices"]
+    assert "bf_emma" in voices
+    assert "bm_george" in voices
+
+
 def test_stream_reports_generation_error_in_band(monkeypatch):
     def boom(text, voice, **kwargs):
         raise RuntimeError("kaboom")

@@ -2,8 +2,9 @@
 
 A small [FastAPI](https://fastapi.tiangolo.com/) server that exposes the
 [Kokoro](https://github.com/hexgrad/kokoro) text-to-speech model over HTTP.
-Send it text, get audio streamed back as it is generated. Configured for
-**American English** only.
+Send it text, get audio streamed back as it is generated. Offers **American
+English** (the recommended, higher-quality voices) and **British English**
+voices, with an adjustable speech rate.
 
 It pairs with the companion [browser extension](../extension), which streams from
 this server (default `http://localhost:18001`) — but the HTTP API is usable on
@@ -33,8 +34,10 @@ Port `18001` is what the companion kokoro-tts browser extension expects
 (`http://localhost:18001/tts/stream`); change it only if you also update the
 extension.
 
-The model is loaded lazily on the **first** request, so the first response is
-noticeably slower than the ones that follow.
+Both pipelines (American and British) are pre-warmed at **startup**, so startup
+takes a little longer but every request — including the first, and the first
+British one — runs at full speed. If pre-warming fails it's logged and the
+model falls back to loading lazily on first use.
 
 ## Deployment
 
@@ -83,7 +86,12 @@ Returns the list of allowed voices — the single source of truth, so clients ca
 populate a dropdown instead of hardcoding the list:
 
 ```json
-{ "voices": ["af_bella", "af_heart", "af_sarah", "af_sky", "am_echo", "am_liam", "am_michael"] }
+{
+  "voices": [
+    "af_bella", "af_heart", "af_sarah", "af_sky", "am_echo", "am_liam", "am_michael",
+    "bf_alice", "bf_emma", "bf_isabella", "bf_lily", "bm_daniel", "bm_fable", "bm_george", "bm_lewis"
+  ]
+}
 ```
 
 Cheap to call: it does not load the model.
@@ -93,19 +101,22 @@ Cheap to call: it does not load the model.
 Request body:
 
 ```json
-{ "text": "Hello from Kokoro", "voice": "af_bella" }
+{ "text": "Hello from Kokoro", "voice": "af_bella", "speed": 1.0 }
 ```
 
-Streams audio as it is generated for low-latency playback of long text: an
-`application/x-ndjson` response with one JSON line per chunk —
+`speed` is optional (default `1.0`, range `0.5`–`2.0`; out-of-range values
+return `422`). Streams audio as it is generated for low-latency playback of long
+text: an `application/x-ndjson` response with one JSON line per chunk —
 `{"sr": 24000, "index": i, "pcm_b64": "<base64 Int16 mono PCM>", "text": "<the
 grapheme text of this chunk>"}` — terminated by `{"done": true}`, or
 `{"error": "..."}` on mid-stream failure. The `text` field lets a client align
 on-screen highlighting to the audio. An empty `text` or an unknown `voice`
 returns `400`.
 
-Available voices: `af_bella`, `af_heart`, `af_sarah`, `af_sky`, `am_echo`,
-`am_liam`, `am_michael`.
+Available voices: American English (recommended) — `af_bella`, `af_heart`,
+`af_sarah`, `af_sky`, `am_echo`, `am_liam`, `am_michael`; British English —
+`bf_alice`, `bf_emma`, `bf_isabella`, `bf_lily`, `bm_daniel`, `bm_fable`,
+`bm_george`, `bm_lewis`.
 
 ## Configuration
 

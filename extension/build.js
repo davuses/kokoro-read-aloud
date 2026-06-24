@@ -52,14 +52,25 @@ const copyRecursive = (src, dest) => {
 
 copyRecursive(publicDir, distDir);
 
-// Copy correct background script
-const backgroundFile = "background.js";
-fs.copyFileSync(
-  path.join(srcDir, backgroundFile),
+// Shared constants/helpers. There's no bundler, so we inline this into both the
+// background script and the popup (overwriting the copy made above). This keeps
+// one source of truth while emitting plain scripts that work in Chrome's module
+// service worker and Firefox's classic MV2 background alike.
+const shared = fs.readFileSync(path.join(srcDir, "shared.js"), "utf-8");
+const prependShared = (srcPath, destPath) => {
+  fs.writeFileSync(destPath, `${shared}\n${fs.readFileSync(srcPath, "utf-8")}`);
+};
+
+prependShared(
+  path.join(srcDir, "background.js"),
   path.join(distDir, "background.js")
 );
+prependShared(
+  path.join(publicDir, "popup.js"),
+  path.join(distDir, "popup.js")
+);
 
-// Copy content script
+// Copy content script (standalone — it doesn't use the shared helpers)
 fs.copyFileSync(
   path.join(srcDir, "content.js"),
   path.join(distDir, "content.js")

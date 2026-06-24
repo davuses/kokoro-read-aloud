@@ -4,12 +4,13 @@ import json
 import logging
 import os
 import threading
+from contextlib import asynccontextmanager
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kokoro_model import SAMPLE_RATE, kokoro_model
 
@@ -21,7 +22,22 @@ logger = logging.getLogger(__name__)
 MAX_TEXT_LENGTH = 50_000
 
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Pre-warm both pipelines at startup so the first request (and the first
+    # British request in particular) doesn't pay the one-time model-load cost.
+    # Run it off the event loop; if it fails, log and fall back to lazy loading
+    # on first use rather than refusing to start.
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, kokoro_model.preload)
+        logger.info("Pipelines pre-warmed")
+    except Exception:
+        logger.exception("Pipeline pre-warm failed; loading lazily on first use")
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Comma-separated list of allowed origins, e.g.
 # ALLOWED_ORIGINS="https://example.com,https://app.example.com".
@@ -49,6 +65,9 @@ _inference_lock = asyncio.Lock()
 class TextRequest(BaseModel):
     text: str
     voice: str
+    # Playback rate; 1.0 is natural. Optional so older clients that omit it keep
+    # working. Out-of-range values are rejected by validation (422).
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
 
 
 @app.get("/voices")
@@ -97,7 +116,9 @@ async def tts_stream(body: TextRequest, request: Request):
 
             def produce():
                 try:
-                    for pair in kokoro_model.stream_audio(body.text, body.voice):
+                    for pair in kokoro_model.stream_audio(
+                        body.text, body.voice, speed=body.speed
+                    ):
                         if cancel.is_set():
                             break
                         loop.call_soon_threadsafe(queue.put_nowait, pair)

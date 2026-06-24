@@ -8,7 +8,7 @@ This is a monorepo with two parts:
 
 | Directory | What it is |
 | --- | --- |
-| [`server/`](server) | A small FastAPI server that streams Kokoro audio over HTTP. American English only. |
+| [`server/`](server) | A small FastAPI server that streams Kokoro audio over HTTP. American English (recommended) and British English voices, with adjustable speed. |
 | [`extension/`](extension) | A Chrome (MV3) / Firefox (MV2) extension that reads selected text, a clicked element, or a page's main article — via the server (Kokoro) or a zero-setup Google Translate fallback. |
 
 The extension's Kokoro engine needs the server running; its Google Translate
@@ -24,8 +24,9 @@ uv sync
 uv run uvicorn server:app --host 127.0.0.1 --port 18001
 ```
 
-The first request lazily loads the model (and downloads the weights once). It
-uses the GPU when available and falls back to CPU otherwise.
+On startup the server pre-warms both the American and British pipelines
+(downloading the weights once), so the first request is as fast as later ones.
+It uses the GPU when available and falls back to CPU otherwise.
 
 **2. Build and load the extension** (see [`extension/README.md`](extension/README.md)):
 

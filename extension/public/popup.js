@@ -1,24 +1,16 @@
-const api = typeof browser !== "undefined" ? browser : chrome;
-
-// Default Kokoro server. The real URL is stored in storage.sync (editable in
-// the popup and shared with the background script); this is only the fallback.
-const DEFAULT_SERVER_URL = "http://localhost:18001";
+// `api`, `DEFAULT_SERVER_URL`, `DEFAULT_SPEED`, and `getServerUrl` come from
+// shared.js, which build.js prepends to this file at build time.
 
 // Fallback used only when the server is unreachable, so the dropdown still
 // renders (and a previously selected voice still displays) while offline. The
-// server's /voices endpoint is the source of truth when it is reachable.
+// server's /voices endpoint is the source of truth when it is reachable. Keep
+// this in sync with the server's ALLOWED_VOICES (American first, then British).
 const FALLBACK_VOICES = [
   "af_bella", "af_heart", "af_sarah", "af_sky",
   "am_echo", "am_liam", "am_michael",
+  "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+  "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
 ];
-
-function getServerUrl() {
-  return new Promise((resolve) => {
-    api.storage.sync.get("serverUrl", (data) => {
-      resolve((data.serverUrl || DEFAULT_SERVER_URL).replace(/\/+$/, ""));
-    });
-  });
-}
 
 document.addEventListener("DOMContentLoaded", async () => {
   const ttsSelect = document.getElementById("tts-select");
@@ -45,6 +37,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   ttsSelect.addEventListener("change", () => {
     api.storage.sync.set({ ttsEngine: ttsSelect.value });
     updateServerStatus();
+  });
+
+  // Speed slider (Kokoro only): load the stored rate, then persist + live-update
+  // the readout on every change.
+  const speedRange = document.getElementById("speed-range");
+  const speedValue = document.getElementById("speed-value");
+  api.storage.sync.get("ttsSpeed", (data) => {
+    const speed = Number(data.ttsSpeed) || DEFAULT_SPEED;
+    speedRange.value = speed;
+    speedValue.textContent = `${speed.toFixed(1)}×`;
+  });
+  speedRange.addEventListener("input", () => {
+    const speed = Number(speedRange.value);
+    speedValue.textContent = `${speed.toFixed(1)}×`;
+    api.storage.sync.set({ ttsSpeed: speed });
   });
 
   // Persist the server URL on edit, then re-fetch voices and re-check status
@@ -101,7 +108,10 @@ function optionExists(select, value) {
 function addVoiceOption(select, voice) {
   const opt = document.createElement("option");
   opt.value = `kokoro_${voice}`;
-  opt.textContent = `Kokoro ${voice.replace(/_/g, " ")}`;
+  const label = `Kokoro ${voice.replace(/_/g, " ")}`;
+  // American English voices ("a*") are higher quality than the British ("b*")
+  // ones, so flag them as the recommended pick in the dropdown.
+  opt.textContent = voice.startsWith("a") ? `${label} (recommended)` : label;
   select.appendChild(opt);
 }
 
@@ -116,10 +126,13 @@ function updateServerStatus() {
   const ttsSelect = document.getElementById("tts-select");
   const indicator = document.getElementById("server-status");
   const urlRow = document.getElementById("server-url-row");
+  const speedRow = document.getElementById("speed-row");
   const isKokoro = ttsSelect.value.startsWith("kokoro");
   indicator.style.display = isKokoro ? "block" : "none";
-  // Only show the server URL field when a Kokoro voice is selected.
+  // Only show the server URL field and speed slider when a Kokoro voice is
+  // selected (Google Translate has its own fixed rate).
   urlRow.style.display = isKokoro ? "block" : "none";
+  speedRow.style.display = isKokoro ? "block" : "none";
   if (isKokoro) pingServer(indicator);
 }
 

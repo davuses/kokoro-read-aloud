@@ -1,17 +1,6 @@
-const api = typeof browser !== "undefined" ? browser : chrome;
+// `api`, `DEFAULT_SPEED`, and `getServerUrl` come from shared.js, which build.js
+// prepends to this file (see its comment for why concatenation, not imports).
 const actionApi = api.action ?? api.browserAction;
-
-// Where the Kokoro server lives. Configurable from the popup and persisted in
-// storage.sync; this constant is only the fallback when nothing is stored.
-const DEFAULT_SERVER_URL = "http://localhost:18001";
-
-function getServerUrl() {
-  return new Promise((resolve) => {
-    api.storage.sync.get("serverUrl", (data) => {
-      resolve((data.serverUrl || DEFAULT_SERVER_URL).replace(/\/+$/, ""));
-    });
-  });
-}
 
 function createMenus() {
   api.contextMenus.create({
@@ -63,14 +52,15 @@ api.runtime.onMessage.addListener((message, sender) => {
 });
 
 async function handleTTS(selectedText, tabId) {
-  api.storage.sync.get(["ttsEngine"], async (data) => {
+  api.storage.sync.get(["ttsEngine", "ttsSpeed"], async (data) => {
     const ttsEngine = data.ttsEngine || "google-translate";
 
     if (ttsEngine.startsWith("kokoro")) {
       // Kokoro always streams: lower latency for long narration, and the
       // streaming player can still export the full audio as a WAV download.
       const voice = ttsEngine.split("_").slice(1).join("_");
-      streamKokoro(selectedText, voice, tabId);
+      const speed = Number(data.ttsSpeed) || DEFAULT_SPEED;
+      streamKokoro(selectedText, voice, tabId, speed);
     } else if (ttsEngine === "google-translate") {
       const gtUrl = `https://www.google.com/speech-api/v1/synthesize?text=${encodeURIComponent(selectedText)}&enc=mpeg&lang=en-us&speed=0.45&client=lr-language-tts&use_google_only_voices=1`;
 
@@ -108,7 +98,7 @@ async function handleTTS(selectedText, tabId) {
 // Streaming playback: open a port to the page, stream NDJSON PCM chunks from
 // the server, and forward each to the streaming player. Closing the player
 // disconnects the port, which aborts the fetch so the server stops generating.
-async function streamKokoro(text, voice, tabId) {
+async function streamKokoro(text, voice, tabId, speed = DEFAULT_SPEED) {
   let port;
   try {
     port = api.tabs.connect(tabId, { name: "tts-stream" });
@@ -132,7 +122,7 @@ async function streamKokoro(text, voice, tabId) {
     const response = await fetch(`${serverUrl}/tts/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice }),
+      body: JSON.stringify({ text, voice, speed }),
       signal: controller.signal,
     });
 
