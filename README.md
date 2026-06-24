@@ -5,6 +5,10 @@ A small [FastAPI](https://fastapi.tiangolo.com/) server that exposes the
 Send it text, get audio streamed back as it is generated. Configured for
 **American English** only.
 
+It pairs with the companion browser extension,
+[kokoro-tts-extension](../kokoro-tts-extension), which streams from this server
+(default `http://localhost:18001`) — but the HTTP API is usable on its own.
+
 ## Requirements
 
 - Python >= 3.12
@@ -31,6 +35,36 @@ extension.
 
 The model is loaded lazily on the **first** request, so the first response is
 noticeably slower than the ones that follow.
+
+## Deployment
+
+For others deploying this, the whole story is `uv` — there is **no Dockerfile by
+design**:
+
+- **GPU:** install a recent **NVIDIA driver**, then `uv sync`. You do *not* need a
+  system CUDA toolkit — the PyTorch wheel bundles the CUDA runtime. The model uses
+  the GPU automatically when `torch.cuda.is_available()`.
+- **CPU:** no driver needed; it falls back to CPU automatically (slower, but
+  works).
+- **First run** downloads the Kokoro weights (~hundreds of MB), so the machine
+  needs network access and a little disk on first use.
+- **Optional:** the phonemizer workaround in [Notes](#notes) needs `espeak-ng`
+  (`apt install espeak-ng`); the default path does not.
+
+### Security
+
+There is **no authentication or rate limiting** — anyone who can reach the port
+can use your GPU. The `--host 0.0.0.0` in the example above exposes the server to
+your whole network; bind to `127.0.0.1` instead if only the local machine (and
+the extension) should reach it:
+
+```bash
+uv run uvicorn server:app --host 127.0.0.1 --port 18001
+```
+
+Requests are capped at 50,000 characters to keep a single call from holding the
+inference lock indefinitely. If you expose this beyond a trusted network, put it
+behind a reverse proxy that adds auth/rate limits and set `ALLOWED_ORIGINS`.
 
 ## Tests
 
@@ -97,3 +131,7 @@ tokens = phonemize(
     with_stress=True,
 )
 ```
+
+## License
+
+[Apache-2.0](LICENSE). The Kokoro model itself is also Apache-2.0.

@@ -1,8 +1,10 @@
 [project]
 name = "kokoro-server"
-version = "0.1.0"
+version = "1.0.0"
 description = "FastAPI server exposing the Kokoro text-to-speech model over an HTTP endpoint."
 readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "davuses" }]
 requires-python = ">=3.12"
 dependencies = [
     "en-core-web-sm",

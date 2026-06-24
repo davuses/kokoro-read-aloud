@@ -11,8 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from kokoro_model import SAMPLE_RATE, kokoro_model
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Reject oversized bodies: each request holds the single inference lock for the
+# whole stream, so an unbounded text could pin the GPU indefinitely.
+MAX_TEXT_LENGTH = 50_000
 
 
 app = FastAPI()
@@ -53,8 +59,6 @@ def voices():
     the extension can fetch it to populate its dropdown instead of hardcoding.
     Cheap to call — reading the class attribute does not load the model.
     """
-    from kokoro_model import kokoro_model
-
     return {"voices": kokoro_model.ALLOWED_VOICES}
 
 
@@ -68,10 +72,13 @@ async def tts_stream(body: TextRequest, request: Request):
     mid-stream (the HTTP status is already 200 by then, so failures are
     reported in-band).
     """
-    from kokoro_model import SAMPLE_RATE, kokoro_model
-
     if not body.text:
         raise HTTPException(status_code=400, detail="No text provided")
+    if len(body.text) > MAX_TEXT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Text too long (max {MAX_TEXT_LENGTH} characters)",
+        )
     if body.voice not in kokoro_model.ALLOWED_VOICES:
         raise HTTPException(
             status_code=400,

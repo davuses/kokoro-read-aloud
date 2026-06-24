@@ -3,10 +3,12 @@ import warnings
 
 import numpy as np
 
-# Suppress all warnings
-warnings.filterwarnings("ignore")
+# Kokoro/torch are noisy with UserWarning/FutureWarning on load (deprecated
+# APIs, weight-norm notices). Silence just those categories rather than every
+# warning process-wide, so genuine warnings still surface.
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Native sample rate of the Kokoro model output.
@@ -44,9 +46,7 @@ class KokoroModel:
             )  # make sure lang_code matches voice
         return self.pipeline
 
-    def stream_audio(
-        self, text: str, voice: str, speed=1, split_pattern=r"\n+"
-    ):
+    def stream_audio(self, text: str, voice: str):
         """Yield ``(text, audio)`` pairs as they are generated.
 
         Kokoro's pipeline yields one chunk per <=510-token (sentence-grouped)
@@ -58,9 +58,8 @@ class KokoroModel:
         if voice not in self.ALLOWED_VOICES:
             raise ValueError(f"Unknown voice: {voice!r}")
         pipeline = self._ensure_pipeline()
-        generator = pipeline(
-            text, voice=voice, speed=speed, split_pattern=split_pattern
-        )
+        # Split on blank lines so each chunk is a sentence-grouped piece.
+        generator = pipeline(text, voice=voice, split_pattern=r"\n+")
         for graphemes, _, audio in generator:
             if audio is None:
                 continue
