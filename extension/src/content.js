@@ -308,7 +308,41 @@ document.addEventListener(
 
 // Block-level, text-bearing elements treated as paragraphs for reading.
 const READABLE_BLOCK_SELECTOR =
-  "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, dd, figcaption, td";
+  "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, dd, td";
+
+// id/class name fragments that mark an element as page furniture rather than
+// article body — nav menus, comments, share/related widgets, ads, footers, etc.
+const BOILERPLATE_RE =
+  /(?:^|[-_\s])(?:nav|navbar|menus?|breadcrumbs?|shares?|social|comments?|disqus|related|recommend\w*|sidebars?|aside|widgets?|promos?|sponsors?|adverts?|ads?|newsletter|subscribe|footer|bylines?|caption|credits?|meta|tags?|cookie|banners?|popups?|modal|masthead|toolbars?)(?:[-_\s]|$)/i;
+
+// True if the element sits inside a non-content landmark or a container whose
+// id/class looks like boilerplate. Walks ancestors up to <body>.
+function isBoilerplate(el) {
+  for (let n = el; n && n !== document.body; n = n.parentElement) {
+    const tag = n.tagName;
+    if (tag === "NAV" || tag === "ASIDE" || tag === "FOOTER" || tag === "FIGURE") {
+      return true;
+    }
+    const role = n.getAttribute && n.getAttribute("role");
+    if (role && /^(navigation|complementary|banner|contentinfo|menu|search)$/i.test(role)) {
+      return true;
+    }
+    const cls = typeof n.className === "string" ? n.className : "";
+    const idClass = `${n.id || ""} ${cls}`.trim();
+    if (idClass && BOILERPLATE_RE.test(idClass)) return true;
+  }
+  return false;
+}
+
+// Fraction of a block's text that sits inside links. High link density is the
+// tell-tale of nav bars, tag clouds, "related stories", and footer link lists.
+function linkDensity(el) {
+  const total = (el.innerText || "").trim().length;
+  if (!total) return 0;
+  let linked = 0;
+  for (const a of el.querySelectorAll("a")) linked += (a.innerText || "").length;
+  return linked / total;
+}
 
 function readableBlocks(container) {
   return Array.from(
@@ -321,6 +355,9 @@ function readableBlocks(container) {
     if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") {
       return false;
     }
+    // Drop page furniture and link-heavy blocks — the main source of noise.
+    if (isBoilerplate(el)) return false;
+    if (linkDensity(el) > 0.5) return false;
     return true;
   });
 }
@@ -349,7 +386,11 @@ function startReading(roots) {
 function readFromHere() {
   const start = lastContextElement;
   if (!start) return;
-  const blocks = readableBlocks(document.body);
+  // Scope to the article the click landed in so we don't sweep the sidebars,
+  // comments, and footers that follow it in document order. Fall back to
+  // main-article detection when the click isn't inside a semantic container.
+  const root = start.closest("article, main, [role='main']") || findMainArticle();
+  const blocks = readableBlocks(root);
   const idx = blocks.findIndex(
     (b) =>
       b === start ||
@@ -365,7 +406,12 @@ function readFromHere() {
 }
 
 function readArticle() {
-  startReading([findMainArticle()]);
+  const root = findMainArticle();
+  // Read the article's filtered blocks (skipping in-article nav/captions/share
+  // widgets) rather than the whole container's innerText. Fall back to the
+  // container if filtering left nothing (e.g. an unusual layout).
+  const blocks = readableBlocks(root);
+  startReading(blocks.length ? blocks : [root]);
 }
 
 // Best-effort main-content detection: prefer a semantic container, else the
