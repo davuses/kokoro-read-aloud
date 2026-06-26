@@ -358,6 +358,10 @@ function readableBlocks(container) {
     // Drop page furniture and link-heavy blocks — the main source of noise.
     if (isBoilerplate(el)) return false;
     if (linkDensity(el) > 0.5) return false;
+    // Drop single-word UI labels ("Share", "Advertisement", "Menu") that aren't
+    // headings — real prose has spaces.
+    const isHeading = /^H[1-6]$/.test(el.tagName);
+    if (!isHeading && text.length < 20 && !/\s/.test(text)) return false;
     return true;
   });
 }
@@ -414,33 +418,51 @@ function readArticle() {
   startReading(blocks.length ? blocks : [root]);
 }
 
-// Best-effort main-content detection: prefer a semantic container, else the
-// ancestor holding the most paragraph text. Lighter (and less robust) than a
-// full Readability pass — good enough for typical article pages.
+// Best-effort main-content detection, using Readability-style positive scoring
+// (a lighter, live-DOM version of what Firefox Reader View does). Each paragraph
+// scores by length and comma count — both signals of real prose — dampened by
+// its link density, and that score propagates to ancestors (parent full,
+// grandparent half, …). The highest-scoring ancestor is the article body.
 function findMainArticle() {
-  const semantic = document.querySelector("article, main, [role='main']");
-  if (semantic && (semantic.innerText || "").trim().length > 200) {
-    return semantic;
+  // Trust a semantic container only when it's clearly the article: enough text
+  // and not mostly links (rejects nav-heavy <main> wrappers and feed <article>
+  // cards). Otherwise fall through to scoring.
+  for (const sel of ["article", "[role='main']", "main"]) {
+    const el = document.querySelector(sel);
+    if (el && (el.innerText || "").trim().length > 200 && linkDensity(el) < 0.3) {
+      return el;
+    }
   }
-  const paras = Array.from(document.querySelectorAll("p")).filter(
-    (p) => (p.innerText || "").trim().length > 40
-  );
+
   const scores = new Map();
-  for (const p of paras) {
-    const len = p.innerText.trim().length;
+  const add = (el, s) => scores.set(el, (scores.get(el) || 0) + s);
+  for (const p of document.querySelectorAll("p, blockquote, pre, li")) {
+    const text = (p.innerText || "").trim();
+    if (text.length < 25) continue;
+    // Readability's paragraph score: base + one per comma + one per ~100 chars
+    // (capped), scaled down by how much of it is links.
+    const commas = (text.match(/,/g) || []).length;
+    let score = (1 + commas + Math.min(Math.floor(text.length / 100), 3)) *
+      (1 - linkDensity(p));
+    if (score <= 0) continue;
     let el = p.parentElement;
     let depth = 0;
-    while (el && el !== document.body && depth < 4) {
-      scores.set(el, (scores.get(el) || 0) + len);
+    while (el && el !== document.body && depth < 3) {
+      add(el, score / (depth + 1));
       el = el.parentElement;
       depth++;
     }
   }
+
   let best = null;
   let bestScore = 0;
   for (const [el, score] of scores) {
-    if (score > bestScore) {
-      bestScore = score;
+    // Penalize containers that are mostly links or look like boilerplate, so a
+    // nav-heavy wrapper can't outscore the real body.
+    const adjusted =
+      score * (1 - linkDensity(el)) * (isBoilerplate(el) ? 0.2 : 1);
+    if (adjusted > bestScore) {
+      bestScore = adjusted;
       best = el;
     }
   }
