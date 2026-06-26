@@ -10,10 +10,27 @@ It pairs with the companion [browser extension](../extension), which streams fro
 this server (default `http://localhost:18001`) — but the HTTP API is usable on
 its own.
 
+## Windows installer (recommended for non-technical users)
+
+Windows users can install the server like a normal app: download
+`kokoro-tts-server-setup.exe` from the
+[Releases](https://github.com/davuses/kokoro-read-aloud/releases) page and run
+it. The installer copies the server, sets up the `uv` toolchain and
+dependencies (a few minutes, one time), adds Start Menu / optional desktop
+shortcuts, and can **start automatically when you sign in**. It runs the server
+in the background from a **system-tray icon** (right-click → *Quit* to stop) —
+no console window to keep open.
+
+The installer is small: the heavy ML dependencies and the model weights are
+downloaded by the setup step / on first use, not bundled. The tray app lives in
+[`tray.py`](tray.py); the installer is built from
+[`installer/kokoro-server.iss`](installer/kokoro-server.iss) by the
+`release-installer` CI workflow.
+
 ## Easy start (no command line)
 
-If you just want to run the server without touching a terminal, double-click the
-launcher for your system inside the `server/` folder:
+If you prefer not to install anything, double-click the launcher for your system
+inside the `server/` folder:
 
 | System | File |
 | --- | --- |
