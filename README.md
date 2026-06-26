@@ -1,5 +1,7 @@
 # kokoro-read-aloud
 
+**English** | [简体中文](README.zh-CN.md)
+
 Read web pages aloud with [Kokoro](https://github.com/hexgrad/kokoro) TTS — a
 self-hosted neural text-to-speech server plus a cross-browser extension that
 streams from it, with a karaoke-style highlight that follows along as it reads.
