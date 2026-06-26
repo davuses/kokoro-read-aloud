@@ -26,6 +26,11 @@ if %errorlevel% neq 0 (
   )
 )
 
+REM A previous failed run can leave a broken .venv (created before the
+REM interpreter was ready) that uv refuses to reuse. Remove such a stale env
+REM (one with no Python executable) so uv can recreate it cleanly.
+if exist ".venv" if not exist ".venv\Scripts\python.exe" rmdir /s /q ".venv"
+
 uv sync --group tray
 if %errorlevel% neq 0 (
   echo.

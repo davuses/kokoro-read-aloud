@@ -32,6 +32,9 @@ if %errorlevel% neq 0 (
 )
 
 echo Installing dependencies ^(first run can take several minutes^)...
+REM Remove a stale/broken .venv (no Python executable) left by a failed run so
+REM uv can recreate it cleanly instead of refusing to use it.
+if exist ".venv" if not exist ".venv\Scripts\python.exe" rmdir /s /q ".venv"
 uv sync
 if %errorlevel% neq 0 (
   echo.
