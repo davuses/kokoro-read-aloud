@@ -10,6 +10,11 @@ REM Keep this window open while you use the extension. Close it to stop the serv
 cd /d "%~dp0"
 title Kokoro TTS Server
 
+REM Keep uv's managed Python on a local, non-redirected path. Some Windows
+REM profiles redirect/sync %APPDATA% (Roaming) to OneDrive or a network share,
+REM which uv can't traverse ("untrusted mount point", os error 448).
+set "UV_PYTHON_INSTALL_DIR=%LOCALAPPDATA%\uv\python"
+
 echo Starting Kokoro TTS server setup...
 echo.
 

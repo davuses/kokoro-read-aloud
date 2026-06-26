@@ -8,6 +8,10 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 appDir = fso.GetParentFolderName(WScript.ScriptFullName)
 sh.CurrentDirectory = appDir
 
+' Match setup.bat: keep uv's managed Python on a local, non-redirected path
+' (Roaming may be OneDrive/network-redirected, which uv can't traverse).
+sh.Environment("Process").Item("UV_PYTHON_INSTALL_DIR") = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%\uv\python")
+
 pyw = appDir & "\.venv\Scripts\pythonw.exe"
 If fso.FileExists(pyw) Then
   sh.Run """" & pyw & """ tray.py", 0, False

@@ -6,6 +6,11 @@ REM including the tray app. The model weights download on first server start.
 cd /d "%~dp0"
 title Kokoro TTS Server - Setup
 
+REM Keep uv's managed Python on a local, non-redirected path. Some Windows
+REM profiles redirect/sync %APPDATA% (Roaming) to OneDrive or a network share,
+REM which uv can't traverse ("untrusted mount point", os error 448).
+set "UV_PYTHON_INSTALL_DIR=%LOCALAPPDATA%\uv\python"
+
 echo Setting up the Kokoro TTS server.
 echo This downloads several hundred MB and can take a few minutes...
 echo.
