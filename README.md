@@ -18,6 +18,18 @@ engine does not.
 
 ## Quickstart
 
+> **Easiest install — Windows, no command line.** From the latest
+> [release](https://github.com/davuses/kokoro-read-aloud/releases):
+>
+> 1. Run **`kokoro-tts-server-setup.exe`**. It sets everything up (first run
+>    downloads a few hundred MB, several minutes) and then runs the server from a
+>    **system-tray icon** — can also start automatically when you sign in.
+> 2. Unzip **`kokoro-extension-chrome.zip`**, open `chrome://extensions`, enable
+>    *Developer mode*, and **Load unpacked** the unzipped folder.
+> 3. Click the extension, pick a Kokoro voice, and use the popup's read buttons.
+>
+> The steps below are for macOS/Linux and for developers.
+
 **1. Run the server** (see [`server/README.md`](server/README.md) for details):
 
 Not comfortable with a terminal? Double-click the launcher for your system in

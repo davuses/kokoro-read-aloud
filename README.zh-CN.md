@@ -17,6 +17,18 @@
 
 ## 快速开始
 
+> **最简单的安装方式 —— Windows，无需命令行。** 从最新的
+> [release](https://github.com/davuses/kokoro-read-aloud/releases) 下载：
+>
+> 1. 运行 **`kokoro-tts-server-setup.exe`**。它会自动完成全部安装配置（首次运行需
+>    下载几百 MB，耗时数分钟），随后以**系统托盘图标**的方式在后台运行服务器，也
+>    可设置为登录时自动启动。
+> 2. 解压 **`kokoro-extension-chrome.zip`**，打开 `chrome://extensions`，启用
+>    *开发者模式*，再**加载已解压的扩展程序**，选择解压后的文件夹。
+> 3. 点击扩展图标，选择一个 Kokoro 语音，使用弹出窗口中的朗读按钮即可。
+>
+> 下面的步骤适用于 macOS/Linux 以及开发者。
+
 **1. 运行服务器**（详见 [`server/README.md`](server/README.md)）：
 
 不熟悉命令行？直接双击 `server/` 文件夹中对应你系统的启动器即可，无需运行下面的
