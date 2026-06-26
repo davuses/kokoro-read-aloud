@@ -37,6 +37,10 @@ It uses the GPU when available and falls back to CPU otherwise.
 
 **2. Build and load the extension** (see [`extension/README.md`](extension/README.md)):
 
+Don't want to build? Download a prebuilt zip from the
+[Releases](https://github.com/davuses/kokoro-read-aloud/releases) page, unzip it,
+and load the folder (skip the commands below).
+
 ```bash
 cd extension
 npm install
