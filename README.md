@@ -18,6 +18,11 @@ engine does not.
 
 **1. Run the server** (see [`server/README.md`](server/README.md) for details):
 
+Not comfortable with a terminal? Double-click the launcher for your system in
+the `server/` folder — `start-server.bat` (Windows), `start-server.command`
+(macOS), or `start-server.sh` (Linux) — and skip the commands below. It sets
+everything up on first run.
+
 ```bash
 cd server
 uv sync

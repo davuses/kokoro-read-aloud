@@ -1,0 +1,5 @@
+# Keep launcher scripts in the line endings their platform expects, regardless
+# of a contributor's core.autocrlf setting.
+*.bat       text eol=crlf
+*.command   text eol=lf
+*.sh        text eol=lf

@@ -10,6 +10,26 @@ It pairs with the companion [browser extension](../extension), which streams fro
 this server (default `http://localhost:18001`) — but the HTTP API is usable on
 its own.
 
+## Easy start (no command line)
+
+If you just want to run the server without touching a terminal, double-click the
+launcher for your system inside the `server/` folder:
+
+| System | File |
+| --- | --- |
+| Windows | `start-server.bat` |
+| macOS | `start-server.command` |
+| Linux | `start-server.sh` |
+
+The first run installs the `uv` toolchain for you and downloads the speech model
+(a few hundred MB), so it can take several minutes; later runs start quickly.
+Keep the window open while you use the extension, and close it to stop the
+server. The steps below are the manual equivalent for developers.
+
+> macOS: the first time, right-click `start-server.command` → **Open** to get
+> past Gatekeeper. Linux: if double-clicking doesn't offer "Run in Terminal",
+> run `./start-server.sh` from a terminal.
+
 ## Requirements
 
 - Python >= 3.12
