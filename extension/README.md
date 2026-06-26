@@ -16,10 +16,11 @@ It has two engines:
 
 ## Features
 
-- Read **selected text** (context menu or `Alt+S`).
-- **Read an element** — hover/click a paragraph or section to read just that.
+- **Read the main article** — best-effort detection of the page's main content
+  (popup button or context menu).
+- **Read an element** — hover/click a paragraph or section to read just that
+  (popup button or context menu).
 - **Read from here to the end** — read from the right-clicked spot onward.
-- **Read the main article** — best-effort detection of the page's main content.
 - Streaming player with play/pause, seek, and a WAV download (Kokoro).
 - Sentence-level highlight synced to the audio (Kokoro).
 
@@ -66,12 +67,13 @@ are developing or want an unreleased version.
 2. Click the toolbar icon and pick an engine/voice. When a Kokoro voice is
    selected, a status line shows whether the server is reachable, and a
    **Kokoro server URL** field lets you point at a non-default address.
-3. Select text and choose **TTS with Kokoro** from the context menu (or press
-   `Alt+S`), or use one of the page-reading context-menu items.
+3. Read a page using the popup's **Read main article** / **Pick element to read**
+   buttons, or the right-click context-menu items ("Read an element aloud…",
+   "Read from here to the end", "Read main article aloud").
 
 ## Permissions
 
-- `activeTab`, `<all_urls>` content script — to read the text you select/click
+- `activeTab`, `<all_urls>` content script — to read the text you click/pick
   and to draw the in-page player and highlight.
 - `contextMenus` — the right-click reading actions.
 - `storage` — remembers your chosen engine/voice and server URL.

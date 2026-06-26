@@ -270,29 +270,13 @@ function createProgressBar(onSeek, canSeek = () => true) {
 
 api.runtime.onConnect.addListener((port) => {
   if (port.name !== "tts-stream") return;
-  // Hand the streaming player the source DOM (if any) so it can highlight along:
-  // an explicit page-reading source, else the live text selection.
-  const source = pendingReadSource || captureSelectionSource();
+  // Hand the streaming player the page-reading source (if any) so it can
+  // highlight along. Every reader (element pick, "read from here", "read
+  // article") stashes one before asking the background to synthesize.
+  const source = pendingReadSource;
   pendingReadSource = null;
   createStreamingPlayer(port, source);
 });
-
-// When TTS is triggered on a normal text selection no page-reading source was
-// stashed. Build a highlight source from the live selection's range, then clear
-// the native selection so its blue highlight doesn't fight the karaoke one.
-function captureSelectionSource() {
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
-  const range = sel.getRangeAt(0).cloneRange();
-  const container = range.commonAncestorContainer;
-  const rootEl =
-    container.nodeType === Node.ELEMENT_NODE
-      ? container
-      : container.parentElement;
-  if (!rootEl || rootEl.closest(".tts-player-host")) return null;
-  sel.removeAllRanges();
-  return { roots: [rootEl], range };
-}
 
 api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === "tts_google_translate") {
@@ -301,11 +285,6 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       createAudioPlayer(base64Audio);
     } else {
       console.error("No audio data received");
-    }
-  } else if (message.action === "getSelectedText") {
-    const selectedText = window.getSelection().toString();
-    if (selectedText) {
-      sendResponse({ success: true, text: selectedText });
     }
   } else if (message.action === "enterPickMode") {
     startElementPicker();

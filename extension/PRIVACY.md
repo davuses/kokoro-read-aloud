@@ -1,7 +1,8 @@
 # Privacy
 
 This extension reads text aloud. To do that it sends the text you explicitly
-choose to read (a selection, a clicked element, or detected article content) to a
+choose to read (a clicked element, the page from a clicked point, or detected
+article content) to a
 TTS service. It does **not** read, collect, transmit, or store anything else from
 the pages you visit, and it has no analytics or telemetry.
 
@@ -15,7 +16,7 @@ It depends on the engine you select in the popup:
   streams it back.
 - **Google Translate** — the text is sent to Google's public translate
   text-to-speech endpoint (`https://www.google.com/speech-api/...`) to fetch the
-  audio. This means **your selected text is sent to Google** and is subject to
+  audio. This means **the text you read is sent to Google** and is subject to
   Google's privacy policy. Use the Kokoro engine if you don't want that.
 
 Text is sent only at the moment you trigger a read action. It is sent for

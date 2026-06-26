@@ -11,7 +11,7 @@
 | 目录 | 简介 |
 | --- | --- |
 | [`server/`](server) | 一个小巧的 FastAPI 服务器，通过 HTTP 流式输出 Kokoro 音频。支持美式英语（推荐）和英式英语语音，语速可调。 |
-| [`extension/`](extension) | 一个 Chrome（MV3）/ Firefox（MV2）扩展，可朗读选中的文字、点击的元素或页面正文 —— 既可经由服务器（Kokoro），也可使用零配置的 Google 翻译作为后备方案。 |
+| [`extension/`](extension) | 一个 Chrome（MV3）/ Firefox（MV2）扩展，可朗读页面正文、点击的元素，或从某处开始到页尾的内容 —— 既可经由服务器（Kokoro），也可使用零配置的 Google 翻译作为后备方案。 |
 
 扩展的 Kokoro 引擎需要服务器在运行；而它的 Google 翻译引擎则不需要。
 
@@ -41,7 +41,7 @@ npm run build:chrome     # 或 build:firefox
 ```
 
 然后在浏览器中加载已解压的 `dist-chrome/`（或 `dist-firefox/`），在弹出窗口中
-选择一个 Kokoro 语音，再通过右键菜单或 `Alt+S` 开始朗读。
+选择一个 Kokoro 语音，再通过弹出窗口中的朗读按钮或右键菜单开始朗读。
 
 ## 隐私与安全速览
 

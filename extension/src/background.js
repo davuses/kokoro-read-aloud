@@ -4,11 +4,6 @@ const actionApi = api.action ?? api.browserAction;
 
 function createMenus() {
   api.contextMenus.create({
-    id: "ttsWithKokoro",
-    title: "TTS with Kokoro",
-    contexts: ["selection"],
-  });
-  api.contextMenus.create({
     id: "ttsReadElement",
     title: "Read an element aloud…",
     contexts: ["page"],
@@ -29,9 +24,7 @@ api.runtime.onInstalled.addListener(createMenus);
 api.runtime.onStartup.addListener(createMenus);
 
 api.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === "ttsWithKokoro") {
-    handleTTS(info.selectionText, tab.id);
-  } else if (info.menuItemId === "ttsReadElement") {
+  if (info.menuItemId === "ttsReadElement") {
     // Ask the page to enter element-picker mode; it sends back "tts_text".
     api.tabs.sendMessage(tab.id, { action: "enterPickMode" });
   } else if (info.menuItemId === "ttsReadFromHere") {
@@ -43,8 +36,8 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
-// Text extracted by the content-script element picker comes back here and runs
-// through the same path as a selection.
+// Text extracted by the content-script readers (element picker, "read from
+// here", "read main article") comes back here to be synthesized.
 api.runtime.onMessage.addListener((message, sender) => {
   if (message.action === "tts_text" && message.text && sender.tab) {
     handleTTS(message.text, sender.tab.id);
@@ -184,21 +177,3 @@ async function streamKokoro(text, voice, tabId, speed = DEFAULT_SPEED) {
     try { port.disconnect(); } catch (e) { /* page gone */ }
   }
 }
-
-api.commands.onCommand.addListener(async (command) => {
-  if (command === "Text to Speech") {
-    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
-    api.tabs.sendMessage(tab.id, { action: "getSelectedText" }, (response) => {
-      if (response?.text) {
-        handleTTS(response.text, tab.id);
-      } else {
-        api.notifications.create({
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "No Text Selected",
-          message: "Please select some text before using the TTS feature.",
-        });
-      }
-    });
-  }
-});

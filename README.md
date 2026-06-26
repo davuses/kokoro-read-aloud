@@ -11,7 +11,7 @@ This is a monorepo with two parts:
 | Directory | What it is |
 | --- | --- |
 | [`server/`](server) | A small FastAPI server that streams Kokoro audio over HTTP. American English (recommended) and British English voices, with adjustable speed. |
-| [`extension/`](extension) | A Chrome (MV3) / Firefox (MV2) extension that reads selected text, a clicked element, or a page's main article — via the server (Kokoro) or a zero-setup Google Translate fallback. |
+| [`extension/`](extension) | A Chrome (MV3) / Firefox (MV2) extension that reads a page's main article, a clicked element, or from a clicked point to the end — via the server (Kokoro) or a zero-setup Google Translate fallback. |
 
 The extension's Kokoro engine needs the server running; its Google Translate
 engine does not.
@@ -48,7 +48,8 @@ npm run build:chrome     # or build:firefox
 ```
 
 Then load the unpacked `dist-chrome/` (or `dist-firefox/`) in your browser, pick
-a Kokoro voice in the popup, and use the right-click menu or `Alt+S` to read.
+a Kokoro voice in the popup, and use the popup's read buttons or the right-click
+menu to read.
 
 ## Privacy & security at a glance
 
