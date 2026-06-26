@@ -70,14 +70,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   };
   serverUrlInput.addEventListener("change", applyServerUrl);
 
-  const pickBtn = document.getElementById("pick-element-btn");
-  pickBtn.addEventListener("click", async () => {
+  // Fire a content-script action against the active tab, then close the popup.
+  const runOnActiveTab = async (action) => {
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
     if (tab?.id != null) {
-      api.tabs.sendMessage(tab.id, { action: "enterPickMode" });
+      api.tabs.sendMessage(tab.id, { action });
       window.close();
     }
-  });
+  };
+
+  document
+    .getElementById("read-article-btn")
+    .addEventListener("click", () => runOnActiveTab("readArticle"));
+  document
+    .getElementById("pick-element-btn")
+    .addEventListener("click", () => runOnActiveTab("enterPickMode"));
 
   ttsSelect.addEventListener("wheel", (e) => {
     e.preventDefault();
