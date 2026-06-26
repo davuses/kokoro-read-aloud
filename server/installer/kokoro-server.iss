@@ -54,9 +54,17 @@ Name: "{userstartup}\Kokoro TTS Server"; Filename: "wscript.exe"; Parameters: ""
 
 [Run]
 Filename: "{app}\setup.bat"; StatusMsg: "Installing the Python toolchain and dependencies (this can take a few minutes)..."; Flags: runascurrentuser
-Filename: "wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; Description: "Start the Kokoro TTS server now"; Flags: postinstall nowait runhidden skipifsilent
+; Only offer to launch the tray if setup actually built the environment, so a
+; failed setup doesn't start a broken app that locks the half-built .venv.
+Filename: "wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; Description: "Start the Kokoro TTS server now"; Flags: postinstall nowait runhidden skipifsilent; Check: VenvReady
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.venv"
 Type: filesandordirs; Name: "{app}\__pycache__"
 Type: filesandordirs; Name: "{app}\.pytest_cache"
+
+[Code]
+function VenvReady: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\.venv\Scripts\python.exe'));
+end;
