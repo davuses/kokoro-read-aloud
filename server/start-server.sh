@@ -49,7 +49,11 @@ echo "Server is starting. Keep this window open while you use the extension."
 echo "When you see 'Application startup complete', it's ready to use."
 echo "Close this window (or press Ctrl+C) to stop the server."
 echo
-uv run uvicorn server:app --host 127.0.0.1 --port 18001
+# Run uvicorn as a module (`python -m`) rather than via uv's console-script
+# trampoline (`uv run uvicorn`), which can fail to canonicalize its path when the
+# project lives under a folder with non-ASCII characters (e.g. a Chinese
+# username on Windows).
+uv run python -m uvicorn server:app --host 127.0.0.1 --port 18001
 
 echo
 echo "The server has stopped."

@@ -47,12 +47,17 @@ uv sync
 ## Running
 
 ```bash
-uv run uvicorn server:app --host 0.0.0.0 --port 18001
+uv run python -m uvicorn server:app --host 0.0.0.0 --port 18001
 ```
 
 Port `18001` is what the companion kokoro-tts browser extension expects
 (`http://localhost:18001/tts/stream`); change it only if you also update the
 extension.
+
+> Running uvicorn as a module (`python -m uvicorn`) rather than via the
+> `uv run uvicorn` console-script shim avoids uv's *"trampoline failed to
+> canonicalize script path"* error, which can occur on Windows when the project
+> sits under a folder with non-ASCII characters (e.g. a Chinese username).
 
 Both pipelines (American and British) are pre-warmed at **startup**, so startup
 takes a little longer but every request — including the first, and the first
