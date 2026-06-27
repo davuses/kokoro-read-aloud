@@ -53,23 +53,14 @@ Name: "{userdesktop}\Kokoro TTS Server"; Filename: "wscript.exe"; Parameters: ""
 Name: "{userstartup}\Kokoro TTS Server"; Filename: "wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; Tasks: autostart
 
 [Run]
-; Run setup de-elevated, as the logged-on user. If the installer is elevated and
-; the user's AppData is a reparse point (redirected/synced profile), an elevated
-; process can't traverse it ("untrusted mount point", os error 448) — but the
-; original medium-integrity user can. runasoriginaluser is a no-op when Setup is
-; already non-elevated.
-Filename: "{app}\setup.bat"; StatusMsg: "Installing the Python toolchain and dependencies (this can take a few minutes)..."; Flags: runasoriginaluser
-; Only offer to launch the tray if setup actually built the environment, so a
-; failed setup doesn't start a broken app that locks the half-built .venv.
-Filename: "wscript.exe"; Parameters: """{app}\start-tray.vbs"""; WorkingDir: "{app}"; Description: "Start the Kokoro TTS server now"; Flags: postinstall nowait runhidden skipifsilent runasoriginaluser; Check: VenvReady
+; Do NOT run setup during install: the installer's process tree enforces a
+; reparse-point mitigation that fails on redirected profiles ("untrusted mount
+; point", os error 448). Instead, launch the app through Explorer so it runs in
+; the user's shell context; start-tray.vbs builds the environment on first run
+; (a few-minute, one-time download) and then starts the tray.
+Filename: "{win}\explorer.exe"; Parameters: """{app}\start-tray.vbs"""; Description: "Set up and start the Kokoro TTS server now (first run downloads dependencies)"; Flags: postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.venv"
 Type: filesandordirs; Name: "{app}\__pycache__"
 Type: filesandordirs; Name: "{app}\.pytest_cache"
-
-[Code]
-function VenvReady: Boolean;
-begin
-  Result := FileExists(ExpandConstant('{app}\.venv\Scripts\python.exe'));
-end;
