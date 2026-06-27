@@ -1,7 +1,7 @@
 @echo off
-REM One-time setup for the Kokoro TTS server, run by the installer (safe to
-REM re-run). Installs the uv toolchain if needed and syncs all dependencies,
-REM including the tray app. The model weights download on first server start.
+REM One-time setup for the Kokoro TTS server, run on first launch (and safe to
+REM re-run). Installs the uv toolchain if needed, lets you pick the CPU or GPU
+REM build of PyTorch, and syncs all dependencies (including the tray app).
 
 cd /d "%~dp0"
 title Kokoro TTS Server - Setup
@@ -12,7 +12,6 @@ REM which uv can't traverse ("untrusted mount point", os error 448).
 set "UV_PYTHON_INSTALL_DIR=%LOCALAPPDATA%\uv\python"
 
 echo Setting up the Kokoro TTS server.
-echo This downloads several hundred MB and can take a few minutes...
 echo.
 
 where uv >nul 2>nul
@@ -26,15 +25,28 @@ if %errorlevel% neq 0 (
   )
 )
 
-REM A previous failed run can leave a broken .venv (created before the
-REM interpreter was ready) that uv refuses to reuse. Remove such a stale env
-REM (one with no Python executable) so uv can recreate it cleanly.
+REM Remove a stale/broken .venv (no Python executable) left by a failed run.
 if exist ".venv" if not exist ".venv\Scripts\python.exe" rmdir /s /q ".venv"
 
-uv sync --group tray
+echo Do you have an NVIDIA GPU and want GPU acceleration?
+echo The GPU build downloads about 2.5 GB more. Most people are fine with CPU --
+echo Kokoro generates speech faster than real time on a typical CPU.
+set /p USEGPU="Install the GPU (CUDA) build? [y/N]: "
+echo.
+
+if /i "%USEGPU%"=="y" (
+  echo Installing the GPU build. This downloads several GB and can take a while...
+  type nul > gpu.flag
+  uv sync --group tray --extra cuda
+) else (
+  if exist gpu.flag del gpu.flag
+  echo Installing the CPU build. This downloads several hundred MB...
+  uv sync --group tray
+)
+
 if %errorlevel% neq 0 (
   echo.
-  echo Setup failed. Check your internet connection, then run setup.bat again.
+  echo Setup failed. Check your internet connection, then run setup again.
   pause
   exit /b 1
 )

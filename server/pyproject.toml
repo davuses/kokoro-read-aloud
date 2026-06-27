@@ -11,11 +11,30 @@ dependencies = [
     "fastapi>=0.116.1",
     "kokoro>=0.9.4",
     "numpy<2.0",
+    # Pin the torch series so adding the CUDA index / re-locking doesn't silently
+    # jump to a much newer torch that kokoro may not support. The CPU build (PyPI
+    # default on Windows) and the CUDA build (cu126 index) both resolve here.
+    "torch>=2.7,<2.8",
     "uvicorn>=0.35.0",
 ]
 
+[project.optional-dependencies]
+# Opt-in NVIDIA GPU build of PyTorch (CUDA 12.6): `uv sync --extra cuda`.
+# ~2.5 GB. Without it, torch is the smaller CPU build (the default on Windows;
+# on Linux the default torch is already CUDA-enabled). The server uses the GPU
+# automatically when a CUDA-capable torch is installed.
+cuda = ["torch"]
+
 [tool.uv.sources]
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+# When the `cuda` extra is enabled, pull torch from PyTorch's CUDA index rather
+# than the default (which is CPU-only on Windows).
+torch = [{ index = "pytorch-cuda", extra = "cuda" }]
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [dependency-groups]
 dev = [

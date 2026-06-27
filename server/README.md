@@ -61,6 +61,26 @@ on first use.
 uv sync
 ```
 
+### CPU vs GPU (NVIDIA)
+
+By default this installs the **CPU** build of PyTorch — small, and fast enough
+for typical use (Kokoro generates speech faster than real time on CPU). On
+**Windows**, the CPU build is also what PyPI gives by default, so even a machine
+with an NVIDIA GPU runs on CPU unless you opt in.
+
+To use an **NVIDIA GPU**, install the CUDA build (~2.5 GB, CUDA 12.6):
+
+```bash
+uv sync --extra cuda
+uv run --extra cuda python -m uvicorn server:app --host 0.0.0.0 --port 18001
+```
+
+The double-click launcher and the Windows installer ask **CPU or GPU** on first
+run and remember the choice (a `gpu.flag` file). On Linux the default torch is
+already CUDA-enabled, so the GPU is used without the extra. The server picks the
+GPU automatically whenever a CUDA-capable torch is installed
+([kokoro_model.py](kokoro_model.py): `"cuda" if torch.cuda.is_available()`).
+
 ## Running
 
 ```bash

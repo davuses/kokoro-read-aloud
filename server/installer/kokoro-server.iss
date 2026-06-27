@@ -64,3 +64,4 @@ Filename: "{win}\explorer.exe"; Parameters: """{app}\start-tray.vbs"""; Descript
 Type: filesandordirs; Name: "{app}\.venv"
 Type: filesandordirs; Name: "{app}\__pycache__"
 Type: filesandordirs; Name: "{app}\.pytest_cache"
+Type: files; Name: "{app}\gpu.flag"

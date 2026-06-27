@@ -1,58 +1,30 @@
 @echo off
-REM Kokoro TTS server - easy start (Windows).
-REM
-REM Double-click this file to start the server. The first run installs the "uv"
-REM toolchain and downloads the speech model (a few hundred MB), so it can take
-REM several minutes; later runs start quickly.
-REM
-REM Keep this window open while you use the extension. Close it to stop the server.
+REM Kokoro TTS server - easy start (Windows). Double-click to run the server in a
+REM visible console. (The installer's tray icon is the background alternative.)
+REM First run builds the environment and asks whether to use the CPU or GPU build.
 
 cd /d "%~dp0"
 title Kokoro TTS Server
 
-REM Keep uv's managed Python on a local, non-redirected path. Some Windows
-REM profiles redirect/sync %APPDATA% (Roaming) to OneDrive or a network share,
-REM which uv can't traverse ("untrusted mount point", os error 448).
+REM Keep uv's managed Python on a local, non-redirected path (see setup.bat).
 set "UV_PYTHON_INSTALL_DIR=%LOCALAPPDATA%\uv\python"
 
-echo Starting Kokoro TTS server setup...
-echo.
-
-REM Make sure uv (the Python toolchain manager) is available. It manages its own
-REM Python and dependencies, so nothing else needs to be installed first.
+REM Make sure uv is on PATH (setup installs it to %USERPROFILE%\.local\bin).
 where uv >nul 2>nul
-if %errorlevel% neq 0 (
-  if exist "%USERPROFILE%\.local\bin\uv.exe" (
-    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
-  ) else (
-    echo Installing uv ^(one-time setup^)...
-    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
-  )
-)
+if %errorlevel% neq 0 set "PATH=%USERPROFILE%\.local\bin;%PATH%"
 
-echo Installing dependencies ^(first run can take several minutes^)...
-REM Remove a stale/broken .venv (no Python executable) left by a failed run so
-REM uv can recreate it cleanly instead of refusing to use it.
-if exist ".venv" if not exist ".venv\Scripts\python.exe" rmdir /s /q ".venv"
-uv sync
-if %errorlevel% neq 0 (
-  echo.
-  echo Could not install dependencies. Check your internet connection and try again.
-  pause
-  exit /b 1
-)
+REM First run: build the environment (setup.bat prompts for CPU vs GPU).
+if not exist ".venv\Scripts\python.exe" call "%~dp0setup.bat" || exit /b 1
+
+REM Use the GPU build at runtime if it was chosen during setup.
+set "GPUARG="
+if exist "gpu.flag" set "GPUARG=--extra cuda"
 
 echo.
 echo Server is starting. Keep this window open while you use the extension.
-echo When you see "Application startup complete", it's ready to use.
 echo Close this window to stop the server.
 echo.
-REM Run uvicorn as a module (python -m) rather than via uv's console-script
-REM trampoline (uv run uvicorn), which can fail to canonicalize its path when the
-REM project lives under a folder with non-ASCII characters (e.g. a Chinese
-REM username on Windows).
-uv run python -m uvicorn server:app --host 127.0.0.1 --port 18001
+uv run --group tray %GPUARG% python -m uvicorn server:app --host 127.0.0.1 --port 18001
 
 echo.
 echo The server has stopped.
