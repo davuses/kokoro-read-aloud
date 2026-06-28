@@ -115,10 +115,7 @@ function optionExists(select, value) {
 function addVoiceOption(select, voice) {
   const opt = document.createElement("option");
   opt.value = `kokoro_${voice}`;
-  const label = `Kokoro ${voice.replace(/_/g, " ")}`;
-  // American English voices ("a*") are higher quality than the British ("b*")
-  // ones, so flag them as the recommended pick in the dropdown.
-  opt.textContent = voice.startsWith("a") ? `${label} (recommended)` : label;
+  opt.textContent = `Kokoro ${voice.replace(/_/g, " ")}`;
   select.appendChild(opt);
 }
 
