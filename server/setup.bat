@@ -1,7 +1,7 @@
 @echo off
 REM One-time setup for the Kokoro TTS server, run on first launch (and safe to
-REM re-run). Installs the uv toolchain if needed, lets you pick the CPU or GPU
-REM build of PyTorch, and syncs all dependencies (including the tray app).
+REM re-run). Installs the uv toolchain if needed, picks the CPU or GPU build of
+REM PyTorch, and syncs all dependencies (including the tray app).
 
 cd /d "%~dp0"
 title Kokoro TTS Server - Setup
@@ -28,10 +28,20 @@ if %errorlevel% neq 0 (
 REM Remove a stale/broken .venv (no Python executable) left by a failed run.
 if exist ".venv" if not exist ".venv\Scripts\python.exe" rmdir /s /q ".venv"
 
-echo Do you have an NVIDIA GPU and want GPU acceleration?
-echo The GPU build downloads about 2.5 GB more. Most people are fine with CPU --
-echo Kokoro generates speech faster than real time on a typical CPU.
-set /p USEGPU="Install the GPU (CUDA) build? [y/N]: "
+REM Only offer the GPU build if an NVIDIA GPU is actually present. nvidia-smi
+REM ships with the driver and succeeds only when a usable GPU is installed, so
+REM machines without one don't download ~2.5 GB of CUDA torch for nothing (it
+REM would just fall back to CPU anyway).
+set "USEGPU=n"
+nvidia-smi >nul 2>nul
+if %errorlevel% equ 0 (
+  echo An NVIDIA GPU was detected.
+  echo The GPU build downloads about 2.5 GB more and speeds up long narration;
+  echo the CPU build is smaller and already faster than real time for most use.
+  set /p USEGPU="Install the GPU (CUDA) build? [y/N]: "
+) else (
+  echo No NVIDIA GPU detected -- installing the CPU build.
+)
 echo.
 
 if /i "%USEGPU%"=="y" (
