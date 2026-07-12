@@ -23,6 +23,7 @@ if exist "gpu.flag" set "GPUARG=--extra cuda"
 echo.
 echo Server is starting. Keep this window open while you use the extension.
 echo Close this window to stop the server.
+echo If something goes wrong, the log is at %LOCALAPPDATA%\KokoroTTSServer\server.log
 echo.
 uv run --group tray %GPUARG% python -m uvicorn server:app --host 127.0.0.1 --port 18001
 

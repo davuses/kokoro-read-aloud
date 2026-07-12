@@ -12,10 +12,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app_logging import setup_logging
 from kokoro_model import SAMPLE_RATE, kokoro_model
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 logger = logging.getLogger(__name__)
+
+# Set once startup finishes (pipelines pre-warmed, or failed and falling back to
+# lazy loading). Lets the tray distinguish "still starting" from "ready".
+ready_event = threading.Event()
 
 # Reject oversized bodies: each request holds the single inference lock for the
 # whole stream, so an unbounded text could pin the GPU indefinitely.
@@ -34,6 +39,8 @@ async def lifespan(app: FastAPI):
         logger.info("Pipelines pre-warmed")
     except Exception:
         logger.exception("Pipeline pre-warm failed; loading lazily on first use")
+    finally:
+        ready_event.set()
     yield
 
 
@@ -68,6 +75,13 @@ class TextRequest(BaseModel):
     # Playback rate; 1.0 is natural. Optional so older clients that omit it keep
     # working. Out-of-range values are rejected by validation (422).
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
+@app.get("/health")
+def health():
+    """Liveness/readiness for the tray status indicator. ``ready`` flips true
+    once startup has finished pre-warming (or fallen back to lazy loading)."""
+    return {"ready": ready_event.is_set()}
 
 
 @app.get("/voices")

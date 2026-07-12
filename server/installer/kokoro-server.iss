@@ -36,6 +36,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "..\server.py";        DestDir: "{app}"; Flags: ignoreversion
+Source: "..\app_logging.py";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\kokoro_model.py";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\tray.py";          DestDir: "{app}"; Flags: ignoreversion
 Source: "..\pyproject.toml";   DestDir: "{app}"; Flags: ignoreversion
@@ -65,3 +66,4 @@ Type: filesandordirs; Name: "{app}\.venv"
 Type: filesandordirs; Name: "{app}\__pycache__"
 Type: filesandordirs; Name: "{app}\.pytest_cache"
 Type: files; Name: "{app}\gpu.flag"
+Type: files; Name: "{app}\server.log"
