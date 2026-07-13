@@ -288,6 +288,8 @@ api.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   } else if (message.action === "enterPickMode") {
     startElementPicker();
+  } else if (message.action === "readSelection") {
+    readSelection();
   } else if (message.action === "readFromHere") {
     readFromHere();
   } else if (message.action === "readArticle") {
@@ -345,7 +347,7 @@ function linkDensity(el) {
 }
 
 function readableBlocks(container) {
-  return Array.from(
+  const matches = Array.from(
     container.querySelectorAll(READABLE_BLOCK_SELECTOR)
   ).filter((el) => {
     if (el.closest(".tts-player-host")) return false;
@@ -364,6 +366,16 @@ function readableBlocks(container) {
     if (!isHeading && text.length < 20 && !/\s/.test(text)) return false;
     return true;
   });
+
+  // querySelectorAll also returns nested matches — a <blockquote> and the <p>s
+  // inside it both match, as do <li>/<td>/<dd> wrapping a <p>. Reading both the
+  // wrapper and its children speaks the same text twice, so keep only the
+  // outermost. An ancestor's innerText already covers its descendants', so this
+  // drops nothing (the reverse would lose an outer <li>'s own text when it also
+  // contains a nested list).
+  return matches.filter(
+    (el) => !matches.some((other) => other !== el && other.contains(el))
+  );
 }
 
 // A reading "session": the source roots the streaming player highlights against.
@@ -372,19 +384,93 @@ function readableBlocks(container) {
 // (e.g. when the selected engine is Google Translate, which doesn't stream).
 let pendingReadSource = null;
 
+// Text is generated one segment at a time so the server's inference lock is
+// held only briefly and (in bounded look-ahead mode) we can stop generating
+// once far enough ahead of the playhead. ~900 characters is roughly a minute of
+// speech. Segments break on paragraph boundaries, where a pause belongs anyway,
+// so splitting costs nothing in prosody.
+const SEGMENT_CHARS = 900;
+
+// Split an over-long paragraph on sentence boundaries so one huge <p> can't
+// become a single enormous segment.
+function splitLongParagraph(text, max) {
+  if (text.length <= max) return [text];
+  const parts = [];
+  let cur = "";
+  for (const s of text.split(/(?<=[.!?])\s+/)) {
+    if (cur && cur.length + s.length + 1 > max) {
+      parts.push(cur);
+      cur = s;
+    } else {
+      cur = cur ? `${cur} ${s}` : s;
+    }
+  }
+  if (cur) parts.push(cur);
+  return parts;
+}
+
+// Group paragraphs into segments of at most SEGMENT_CHARS characters.
+function toSegments(paragraphs) {
+  const units = [];
+  for (const p of paragraphs) {
+    const t = (p || "").trim();
+    if (t) units.push(...splitLongParagraph(t, SEGMENT_CHARS));
+  }
+  const segments = [];
+  let cur = "";
+  for (const u of units) {
+    if (cur && cur.length + u.length + 2 > SEGMENT_CHARS) {
+      segments.push(cur);
+      cur = u;
+    } else {
+      cur = cur ? `${cur}\n\n${u}` : u;
+    }
+  }
+  if (cur) segments.push(cur);
+  return segments;
+}
+
 function startReading(roots) {
   roots = (roots || []).filter(Boolean);
-  const text = roots
-    .map((r) => r.innerText || "")
-    .join("\n\n")
-    .trim();
+  const segments = toSegments(roots.map((r) => r.innerText || ""));
+  if (!segments.length) return;
+  startReadingSource({ roots }, segments);
+}
+
+// Read the current text selection. The native selection has to be cleared
+// before playback: ::selection paints *above* custom highlights, so leaving it
+// up would hide the karaoke. Clone the range first — the range handed out by
+// getRangeAt is tied to the selection and can collapse when it is cleared.
+function readSelection() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0).cloneRange();
+  const text = sel.toString().trim();
   if (!text) return;
-  const src = { roots };
+
+  // createKaraoke walks the text nodes under the roots and clips them to the
+  // range, so the root only has to be an element enclosing the whole selection.
+  let root = range.commonAncestorContainer;
+  if (root.nodeType !== Node.ELEMENT_NODE) root = root.parentElement;
+  if (!root) return;
+
+  sel.removeAllRanges();
+  startReadingSource({ roots: [root], range }, toSegments(text.split(/\n{2,}/)));
+}
+
+function startReadingSource(src, segments) {
+  if (!segments.length) return;
   pendingReadSource = src;
   setTimeout(() => {
     if (pendingReadSource === src) pendingReadSource = null;
   }, 8000);
-  api.runtime.sendMessage({ action: "tts_text", text });
+  // `text` is the whole thing (Google Translate does one request); `segments`
+  // is the same text chunked, which the Kokoro path generates on demand.
+  api.runtime.sendMessage({
+    action: "tts_text",
+    text: segments.join("\n\n"),
+    segments,
+  });
 }
 
 function readFromHere() {
@@ -832,6 +918,17 @@ function createStreamingPlayer(port, source) {
   let pumpTimer = null;
   let uiTimer = null;
 
+  // Seconds of audio the server generates ahead of the playhead (0 = unlimited,
+  // i.e. it generates everything up front and we never have to ask for more).
+  let lookAhead = 0;
+  let buffering = false; // ran out of audio mid-read; waiting on the next segment
+  let downloadPending = false; // download clicked before generation finished
+  let lastAsk = 0;
+
+  const send = (msg) => {
+    try { port.postMessage(msg); } catch (e) { /* background gone */ }
+  };
+
   function position() {
     if (!isPlaying) return startOffset;
     return Math.min(startOffset + (audioCtx.currentTime - startCtxTime), totalDuration);
@@ -873,11 +970,23 @@ function createStreamingPlayer(port, source) {
       scheduledUntil = chunks[i].start + chunks[i].buffer.duration;
     }
     // Reached the end of all received audio.
-    if (receivedEnd && position() >= totalDuration - 0.02) {
-      startOffset = totalDuration; // park at the end so the bar/time read 100%
-      isPlaying = false;
-      finished = true;
-      updatePlayButton();
+    if (position() >= totalDuration - 0.02) {
+      if (receivedEnd) {
+        startOffset = totalDuration; // park at the end so the bar/time read 100%
+        isPlaying = false;
+        finished = true;
+        updatePlayButton();
+      } else {
+        // Starved: more audio is still coming (bounded look-ahead, or a server
+        // slower than real time). Freeze at the end of what we have and resume
+        // when the next chunk lands. Re-anchoring on resume is what keeps the
+        // wall-clock timeline from drifting past the audio we actually played.
+        startOffset = totalDuration;
+        stopActiveSources();
+        isPlaying = false;
+        buffering = true;
+        updatePlayButton();
+      }
     }
   }
 
@@ -898,6 +1007,7 @@ function createStreamingPlayer(port, source) {
     startOffset = position();
     stopActiveSources();
     isPlaying = false;
+    buffering = false;
     updatePlayButton();
   }
 
@@ -907,11 +1017,25 @@ function createStreamingPlayer(port, source) {
   // --- UI (shares the same chrome as the buffered player) ---
   const playPauseBtn = makePlayerButton();
   function updatePlayButton() {
-    playPauseBtn.textContent = isPlaying ? "⏸" : finished ? "↺" : "▶";
+    playPauseBtn.textContent = buffering
+      ? "⏳"
+      : isPlaying
+        ? "⏸"
+        : finished
+          ? "↺"
+          : "▶";
   }
   playPauseBtn.addEventListener("click", () => {
-    if (isPlaying) pause();
-    else play(finished ? 0 : startOffset);
+    if (buffering) {
+      // Waiting on audio — treat a click as "stop waiting", so auto-resume
+      // doesn't fight the user.
+      buffering = false;
+      updatePlayButton();
+    } else if (isPlaying) {
+      pause();
+    } else {
+      play(finished ? 0 : startOffset);
+    }
   });
 
   const progress = createProgressBar(
@@ -929,15 +1053,29 @@ function createStreamingPlayer(port, source) {
       progress.setProgress(position() / totalDuration);
     }
     if (karaoke) karaoke.update(position(), finished);
+
+    if (receivedEnd) return;
+    const now = Date.now();
+    if (now - lastAsk < 1000) return;
+    lastAsk = now;
+    // Ask for more audio when the buffer runs below the look-ahead budget. In
+    // unlimited mode the background sends everything unprompted, so the ping is
+    // only a keepalive: without port traffic Chrome tears the MV3 service
+    // worker down after ~30s idle, mid-read.
+    const bufferedAhead = totalDuration - position();
+    if (lookAhead && bufferedAhead < lookAhead) send({ type: "need_more" });
+    else send({ type: "ping" });
   }
 
-  // Disabled until generation finishes, so a download can't capture a
-  // half-generated clip. Re-enabled once all audio has arrived.
-  const downloadButton = makePlayerButton("⬇", "Download (ready when finished)");
-  downloadButton.disabled = true;
-  downloadButton.addEventListener("click", () => {
+  // A download must cover the whole read, not just what has been generated so
+  // far. Under a bounded look-ahead the rest may not exist yet, so clicking
+  // asks the background to generate the remainder and the save happens once it
+  // has all landed.
+  const downloadButton = makePlayerButton("⬇", "Download audio");
+  function doDownload() {
     let n = 0;
     for (const p of pcmParts) n += p.length;
+    if (!n) return;
     const pcm = new Int16Array(n);
     let off = 0;
     for (const p of pcmParts) { pcm.set(p, off); off += p.length; }
@@ -949,6 +1087,16 @@ function createStreamingPlayer(port, source) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  downloadButton.addEventListener("click", () => {
+    if (receivedEnd) {
+      doDownload();
+      return;
+    }
+    downloadPending = true;
+    downloadButton.disabled = true;
+    downloadButton.title = "Generating the rest of the audio…";
+    send({ type: "generate_all" });
   });
 
   const closeButton = makeCloseButton(host);
@@ -983,16 +1131,29 @@ function createStreamingPlayer(port, source) {
       const otherMedia = Array.from(document.querySelectorAll("audio, video"))
         .some((el) => !el.paused && !el.ended && el.readyState > 2);
       if (!otherMedia) play(0);
+    } else if (buffering) {
+      // The audio we were waiting on arrived — resume from where we stalled.
+      buffering = false;
+      play(startOffset);
     } else if (isPlaying) {
       pump();
     }
   }
 
-  // Allow the WAV download once no more audio is coming (and some arrived).
-  function allowDownload() {
-    if (pcmParts.length) {
-      downloadButton.disabled = false;
-      downloadButton.title = "Download audio";
+  // No more audio is coming: stop waiting on it, and honour a download that was
+  // requested while generation was still running.
+  function onEnd() {
+    receivedEnd = true;
+    downloadButton.disabled = false;
+    downloadButton.title = "Download audio";
+    if (buffering) {
+      buffering = false;
+      finished = true;
+      updatePlayButton();
+    }
+    if (downloadPending) {
+      downloadPending = false;
+      doDownload();
     }
   }
 
@@ -1000,12 +1161,12 @@ function createStreamingPlayer(port, source) {
     if (msg.type === "chunk") {
       const u8 = base64ToBytes(msg.pcm_b64);
       addChunk(msg.sr, new Int16Array(u8.buffer), msg.text);
+    } else if (msg.type === "meta") {
+      lookAhead = Number(msg.lookAhead) || 0;
     } else if (msg.type === "end") {
-      receivedEnd = true;
-      allowDownload();
+      onEnd();
     } else if (msg.type === "error") {
-      receivedEnd = true;
-      allowDownload();
+      onEnd();
       timeDisplay.textContent = `⚠ ${String(msg.message).slice(0, 40)}`;
     }
   }
@@ -1015,7 +1176,7 @@ function createStreamingPlayer(port, source) {
   onPortMessage = handleMessage;
   for (const m of pending) handleMessage(m);
 
-  port.onDisconnect.addListener(() => { receivedEnd = true; allowDownload(); });
+  port.onDisconnect.addListener(() => onEnd());
 
   host._cleanup = () => {
     activePlayers.delete(self);

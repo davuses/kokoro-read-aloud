@@ -14,6 +14,13 @@ const DEFAULT_SERVER_URL = "http://localhost:18001";
 // Default playback rate; 1.0 is natural speed.
 const DEFAULT_SPEED = 1.0;
 
+// Seconds of audio to generate ahead of the playhead. 0 = unlimited: generate
+// the whole text as fast as the server can, which is the long-standing default
+// (instant seeking, download ready immediately) at the cost of wasted compute
+// if you stop listening early. A positive value caps that waste, but you can
+// then only seek within what has been generated.
+const DEFAULT_LOOKAHEAD = 0;
+
 // Resolve the configured Kokoro server URL from storage, stripping trailing
 // slashes and falling back to DEFAULT_SERVER_URL when nothing is stored.
 function getServerUrl() {

@@ -54,6 +54,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     api.storage.sync.set({ ttsSpeed: speed });
   });
 
+  // How far ahead of the playhead the server generates. Unlimited (the default)
+  // generates the whole text up front: seeking is instant and the download is
+  // ready immediately, but abandoning a long article wastes that compute. A
+  // bounded value caps the waste and only lets you seek within what's generated.
+  const lookaheadSelect = document.getElementById("lookahead-select");
+  api.storage.sync.get("ttsLookAhead", (data) => {
+    lookaheadSelect.value = String(Number(data.ttsLookAhead) || DEFAULT_LOOKAHEAD);
+  });
+  lookaheadSelect.addEventListener("change", () => {
+    api.storage.sync.set({ ttsLookAhead: Number(lookaheadSelect.value) });
+  });
+
   // Persist the server URL on edit, then re-fetch voices and re-check status
   // against the new address.
   const applyServerUrl = async () => {
@@ -137,6 +149,9 @@ function updateServerStatus() {
   // selected (Google Translate has its own fixed rate).
   urlRow.style.display = isKokoro ? "block" : "none";
   speedRow.style.display = isKokoro ? "block" : "none";
+  document.getElementById("lookahead-row").style.display = isKokoro
+    ? "block"
+    : "none";
   if (isKokoro) pingServer(indicator);
 }
 

@@ -9,6 +9,11 @@ function createMenus() {
     contexts: ["page"],
   });
   api.contextMenus.create({
+    id: "ttsReadSelection",
+    title: "Read selection aloud",
+    contexts: ["selection"],
+  });
+  api.contextMenus.create({
     id: "ttsReadFromHere",
     title: "Read from here to the end",
     contexts: ["page", "selection"],
@@ -27,6 +32,10 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "ttsReadElement") {
     // Ask the page to enter element-picker mode; it sends back "tts_text".
     api.tabs.sendMessage(tab.id, { action: "enterPickMode" });
+  } else if (info.menuItemId === "ttsReadSelection") {
+    // Read the highlighted text. The page clears the selection first so the
+    // karaoke highlight isn't painted over by ::selection.
+    api.tabs.sendMessage(tab.id, { action: "readSelection" });
   } else if (info.menuItemId === "ttsReadFromHere") {
     // Read the right-clicked element and everything after it.
     api.tabs.sendMessage(tab.id, { action: "readFromHere" });
@@ -40,12 +49,13 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
 // here", "read main article") comes back here to be synthesized.
 api.runtime.onMessage.addListener((message, sender) => {
   if (message.action === "tts_text" && message.text && sender.tab) {
-    handleTTS(message.text, sender.tab.id);
+    const segments = message.segments?.length ? message.segments : [message.text];
+    handleTTS(message.text, segments, sender.tab.id);
   }
 });
 
-async function handleTTS(selectedText, tabId) {
-  api.storage.sync.get(["ttsEngine", "ttsSpeed"], async (data) => {
+async function handleTTS(selectedText, segments, tabId) {
+  api.storage.sync.get(["ttsEngine", "ttsSpeed", "ttsLookAhead"], async (data) => {
     const ttsEngine = data.ttsEngine || "google-translate";
 
     if (ttsEngine.startsWith("kokoro")) {
@@ -53,7 +63,8 @@ async function handleTTS(selectedText, tabId) {
       // streaming player can still export the full audio as a WAV download.
       const voice = ttsEngine.split("_").slice(1).join("_");
       const speed = Number(data.ttsSpeed) || DEFAULT_SPEED;
-      streamKokoro(selectedText, voice, tabId, speed);
+      const lookAhead = Number(data.ttsLookAhead) || DEFAULT_LOOKAHEAD;
+      streamKokoro(segments, voice, tabId, speed, lookAhead);
     } else if (ttsEngine === "google-translate") {
       const gtUrl = `https://www.google.com/speech-api/v1/synthesize?text=${encodeURIComponent(selectedText)}&enc=mpeg&lang=en-us&speed=0.45&client=lr-language-tts&use_google_only_voices=1`;
 
@@ -88,10 +99,18 @@ async function handleTTS(selectedText, tabId) {
   });
 }
 
-// Streaming playback: open a port to the page, stream NDJSON PCM chunks from
-// the server, and forward each to the streaming player. Closing the player
-// disconnects the port, which aborts the fetch so the server stops generating.
-async function streamKokoro(text, voice, tabId, speed = DEFAULT_SPEED) {
+// Streaming playback: open a port to the page and feed it PCM chunks, one text
+// segment at a time. Closing the player disconnects the port, which aborts the
+// in-flight fetch so the server stops generating.
+//
+// Segments exist for two reasons. The server holds a single global inference
+// lock for the whole of a /tts/stream request, so one long request would block
+// every other read on the server; short ones interleave. And with a bounded
+// look-ahead we simply stop asking for the next segment once we are far enough
+// ahead of the playhead, so abandoning a long article wastes at most one
+// segment instead of the whole thing. lookAhead === 0 means unlimited: fetch
+// every segment back to back, which is the original behaviour.
+async function streamKokoro(segments, voice, tabId, speed = DEFAULT_SPEED, lookAhead = DEFAULT_LOOKAHEAD) {
   let port;
   try {
     port = api.tabs.connect(tabId, { name: "tts-stream" });
@@ -107,10 +126,69 @@ async function streamKokoro(text, voice, tabId, speed = DEFAULT_SPEED) {
     controller.abort();
   });
 
+  let generateAll = !lookAhead;
+  let next = 0; // index of the next segment to generate
+  let fetching = false;
+
+  port.onMessage.addListener((msg) => {
+    if (!msg || aborted) return;
+    if (msg.type === "need_more") {
+      // The player is running low on buffered audio.
+      pumpSegments();
+    } else if (msg.type === "generate_all") {
+      // Download was requested: generate the remainder now.
+      generateAll = true;
+      pumpSegments();
+    }
+    // "ping" needs no handling — port traffic alone keeps the MV3 service
+    // worker from being torn down mid-read while a segment is playing out.
+  });
+
+  // The player needs to know whether to ask for more audio, or just wait.
+  try { port.postMessage({ type: "meta", lookAhead }); } catch (e) { return; }
+
   actionApi?.setBadgeText({ text: "…", tabId });
   actionApi?.setBadgeBackgroundColor({ color: "#3b82f6", tabId });
 
-  try {
+  async function pumpSegments() {
+    if (fetching || aborted || next >= segments.length) return;
+    fetching = true;
+    try {
+      // In unlimited mode keep going; otherwise generate one segment per
+      // request from the player.
+      do {
+        await streamSegment(segments[next]);
+        if (aborted) return;
+        next += 1;
+      } while (generateAll && next < segments.length);
+    } catch (error) {
+      if (aborted || error.name === "AbortError") return; // user closed the player
+      actionApi?.setBadgeText({ text: "!", tabId });
+      actionApi?.setBadgeBackgroundColor({ color: "#ef4444", tabId });
+      setTimeout(() => actionApi?.setBadgeText({ text: "", tabId }), 2500);
+      console.error("TTS stream error:", error);
+      try { port.postMessage({ type: "error", message: error.message }); } catch (e) { /* page gone */ }
+      api.notifications.create({
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "TTS Server Error",
+        message: `${error.message}. Make sure the kokoro-server is running and the URL in the popup is correct.`,
+      });
+      try { port.disconnect(); } catch (e) { /* page gone */ }
+      return;
+    } finally {
+      fetching = false;
+    }
+
+    if (next >= segments.length) {
+      actionApi?.setBadgeText({ text: "", tabId });
+      try { port.postMessage({ type: "end" }); } catch (e) { /* page gone */ }
+      try { port.disconnect(); } catch (e) { /* page gone */ }
+    }
+  }
+
+  // Generate one segment, forwarding each PCM chunk to the player as it lands.
+  async function streamSegment(text) {
     const serverUrl = await getServerUrl();
     const response = await fetch(`${serverUrl}/tts/stream`, {
       method: "POST",
@@ -153,27 +231,12 @@ async function streamKokoro(text, voice, tabId, speed = DEFAULT_SPEED) {
           port.postMessage({ type: "chunk", sr: obj.sr, pcm_b64: obj.pcm_b64, text: obj.text });
         } else if (obj.error) {
           port.postMessage({ type: "error", message: obj.error });
-        } else if (obj.done) {
-          port.postMessage({ type: "end" });
         }
+        // A per-segment {"done":true} is not the end of the read; the outer
+        // loop decides that once every segment has been generated.
       }
     }
-    actionApi?.setBadgeText({ text: "", tabId });
-    try { port.disconnect(); } catch (e) { /* page gone */ }
-  } catch (error) {
-    actionApi?.setBadgeText({ text: "", tabId });
-    if (aborted || error.name === "AbortError") return; // user closed the player
-    actionApi?.setBadgeText({ text: "!", tabId });
-    actionApi?.setBadgeBackgroundColor({ color: "#ef4444", tabId });
-    setTimeout(() => actionApi?.setBadgeText({ text: "", tabId }), 2500);
-    console.error("TTS stream error:", error);
-    try { port.postMessage({ type: "error", message: error.message }); } catch (e) { /* page gone */ }
-    api.notifications.create({
-      type: "basic",
-      iconUrl: "icons/icon128.png",
-      title: "TTS Server Error",
-      message: `${error.message}. Make sure the kokoro-server is running and the URL in the popup is correct.`,
-    });
-    try { port.disconnect(); } catch (e) { /* page gone */ }
   }
+
+  pumpSegments();
 }

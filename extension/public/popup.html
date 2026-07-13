@@ -48,9 +48,21 @@
         />
       </div>
 
+      <div id="lookahead-row" class="tts-option" style="display: none;">
+        <label for="lookahead-select" class="option-label">Generate ahead</label>
+        <select id="lookahead-select" class="option-select">
+          <option value="0" selected>Unlimited (instant seek)</option>
+          <option value="60">60 seconds</option>
+          <option value="30">30 seconds</option>
+        </select>
+      </div>
+
       <button id="read-article-btn" class="pick-btn">📖 Read main article</button>
       <button id="pick-element-btn" class="pick-btn">🎯 Pick element to read</button>
-      <div class="toggle-hint">Then hover &amp; click a paragraph or section on the page</div>
+      <div class="toggle-hint">
+        Then hover &amp; click a paragraph or section on the page. To read part of
+        a page, select the text, right-click &rarr; “Read selection aloud”.
+      </div>
     </div>
 
     <script src="popup.js"></script>
