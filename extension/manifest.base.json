@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TTS with Kokoro",
-  "version": "2.10.0",
+  "version": "2.10.1",
   "description": "Use Kokoro TTS",
   "background": {
     "service_worker": "background.js",
@@ -13,6 +13,12 @@
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
+    }
+  },
+  "commands": {
+    "read-selection": {
+      "suggested_key": { "default": "Alt+S" },
+      "description": "Read the selected text aloud"
     }
   },
   "permissions": ["activeTab", "contextMenus", "notifications", "storage"],

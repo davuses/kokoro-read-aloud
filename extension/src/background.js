@@ -45,6 +45,20 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+// Alt+S reads the current selection — the same path as the context-menu entry.
+// The tab argument isn't passed on every browser/manifest version, so resolve
+// the active tab ourselves rather than relying on it.
+api.commands?.onCommand.addListener(async (command) => {
+  if (command !== "read-selection") return;
+  const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id == null) return;
+  // No content script on chrome://, the Web Store, PDFs, etc. — sendMessage
+  // rejects there, so swallow it rather than log an unhandled rejection.
+  api.tabs
+    .sendMessage(tab.id, { action: "readSelection" })
+    .catch(() => {});
+});
+
 // Text extracted by the content-script readers (element picker, "read from
 // here", "read main article") comes back here to be synthesized.
 api.runtime.onMessage.addListener((message, sender) => {
