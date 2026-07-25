@@ -998,6 +998,7 @@ function createStreamingPlayer(port, source) {
     scheduledUntil = startOffset;
     isPlaying = true;
     finished = false;
+    buffering = false; // an explicit seek/skip means we're no longer stalled
     audioCtx.resume();
     pump();
     updatePlayButton();
@@ -1099,9 +1100,27 @@ function createStreamingPlayer(port, source) {
     send({ type: "generate_all" });
   });
 
+  // Sentence skip (⏮ ⏭). Only meaningful when the karaoke highlighter is
+  // active, since it owns the sentence→time map; hidden otherwise. Backward is
+  // always free (audio is buffered); forward stops at the edge of what's
+  // generated (nextStart returns null past it).
+  let prevBtn = null;
+  let nextBtn = null;
+  if (karaoke) {
+    prevBtn = makePlayerButton("⏮", "Previous sentence");
+    nextBtn = makePlayerButton("⏭", "Next sentence");
+    prevBtn.addEventListener("click", () => play(karaoke.prevStart(position())));
+    nextBtn.addEventListener("click", () => {
+      const t = karaoke.nextStart(position());
+      if (t != null) play(t);
+    });
+  }
+
   const closeButton = makeCloseButton(host);
 
+  if (prevBtn) audioContainer.appendChild(prevBtn);
   audioContainer.appendChild(playPauseBtn);
+  if (nextBtn) audioContainer.appendChild(nextBtn);
   audioContainer.appendChild(progress.track);
   audioContainer.appendChild(timeDisplay);
   audioContainer.appendChild(downloadButton);
@@ -1300,6 +1319,27 @@ function createKaraoke(roots, range) {
       currentSeg = seg;
       highlight.clear();
       if (seg && seg.range) highlight.add(seg.range);
+    },
+    // Time offset to jump to for "previous sentence": restart the current
+    // sentence if we're well into it (audiobook convention), otherwise the one
+    // before. Only sees sentences whose audio has already been generated.
+    prevStart(pos) {
+      let idx = -1;
+      for (let i = 0; i < segments.length; i++) {
+        if (segments[i].tStart <= pos + 0.05) idx = i;
+        else break;
+      }
+      if (idx < 0) return 0;
+      if (idx === 0 || pos - segments[idx].tStart > 1.5) return segments[idx].tStart;
+      return segments[idx - 1].tStart;
+    },
+    // Time offset of the next sentence, or null if none is generated past `pos`
+    // (so forward-skip naturally stops at the edge of the buffered audio).
+    nextStart(pos) {
+      for (const s of segments) {
+        if (s.tStart > pos + 0.05) return s.tStart;
+      }
+      return null;
     },
     clear() {
       highlight.clear();
