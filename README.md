@@ -16,10 +16,7 @@ This is a monorepo with two parts:
 The extension's Kokoro engine needs the server running; its Google Translate
 engine does not.
 
-<!-- Demo: read main article aloud, with the karaoke highlight following along. -->
-<video src="https://raw.githubusercontent.com/davuses/kokoro-read-aloud/main/docs/demo.mp4" controls muted width="720">
-  Demo: read main article aloud, with the karaoke highlight following along.
-</video>
+![Demo: read main article aloud, with the karaoke highlight following along.](docs/demo.gif)
 
 ## Quickstart
 

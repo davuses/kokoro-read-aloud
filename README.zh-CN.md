@@ -15,10 +15,7 @@
 
 扩展的 Kokoro 引擎需要服务器在运行；而它的 Google 翻译引擎则不需要。
 
-<!-- Demo: read main article aloud, with the karaoke highlight following along. -->
-<video src="https://raw.githubusercontent.com/davuses/kokoro-read-aloud/main/docs/demo.mp4" controls muted width="720">
-  演示：朗读正文，卡拉 OK 式高亮跟随朗读进度。
-</video>
+![演示：朗读正文，卡拉 OK 式高亮跟随朗读进度。](docs/demo.gif)
 
 ## 快速开始
 
