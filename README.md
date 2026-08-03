@@ -16,6 +16,11 @@ This is a monorepo with two parts:
 The extension's Kokoro engine needs the server running; its Google Translate
 engine does not.
 
+<!-- Demo: read main article aloud, with the karaoke highlight following along. -->
+<video src="docs/demo.mp4" controls muted width="720">
+  Demo: read main article aloud, with the karaoke highlight following along.
+</video>
+
 ## Quickstart
 
 > **Easiest install — Windows, no command line.** From the latest
