@@ -69,48 +69,52 @@ api.runtime.onMessage.addListener((message, sender) => {
 });
 
 async function handleTTS(selectedText, segments, tabId) {
-  api.storage.sync.get(["ttsEngine", "ttsSpeed", "ttsLookAhead"], async (data) => {
-    const ttsEngine = data.ttsEngine || "google-translate";
+  api.storage.sync.get(
+    ["ttsEngine", "ttsSpeed", "ttsLookAhead", "ttsAutoScroll"],
+    async (data) => {
+      const ttsEngine = data.ttsEngine || "google-translate";
 
-    if (ttsEngine.startsWith("kokoro")) {
-      // Kokoro always streams: lower latency for long narration, and the
-      // streaming player can still export the full audio as a WAV download.
-      const voice = ttsEngine.split("_").slice(1).join("_");
-      const speed = Number(data.ttsSpeed) || DEFAULT_SPEED;
-      const lookAhead = Number(data.ttsLookAhead) || DEFAULT_LOOKAHEAD;
-      streamKokoro(segments, voice, tabId, speed, lookAhead);
-    } else if (ttsEngine === "google-translate") {
-      const gtUrl = `https://www.google.com/speech-api/v1/synthesize?text=${encodeURIComponent(selectedText)}&enc=mpeg&lang=en-us&speed=0.45&client=lr-language-tts&use_google_only_voices=1`;
+      if (ttsEngine.startsWith("kokoro")) {
+        // Kokoro always streams: lower latency for long narration, and the
+        // streaming player can still export the full audio as a WAV download.
+        const voice = ttsEngine.split("_").slice(1).join("_");
+        const speed = Number(data.ttsSpeed) || DEFAULT_SPEED;
+        const lookAhead = Number(data.ttsLookAhead) || DEFAULT_LOOKAHEAD;
+        const autoScroll = data.ttsAutoScroll ?? DEFAULT_AUTO_SCROLL;
+        streamKokoro(segments, voice, tabId, speed, lookAhead, autoScroll);
+      } else if (ttsEngine === "google-translate") {
+        const gtUrl = `https://www.google.com/speech-api/v1/synthesize?text=${encodeURIComponent(selectedText)}&enc=mpeg&lang=en-us&speed=0.45&client=lr-language-tts&use_google_only_voices=1`;
 
-      actionApi?.setBadgeText({ text: "…", tabId });
-      actionApi?.setBadgeBackgroundColor({ color: "#3b82f6", tabId });
+        actionApi?.setBadgeText({ text: "…", tabId });
+        actionApi?.setBadgeBackgroundColor({ color: "#3b82f6", tabId });
 
-      try {
-        const response = await fetch(gtUrl);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const audioBlob = await response.blob();
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          actionApi?.setBadgeText({ text: "", tabId });
-          api.tabs.sendMessage(tabId, {
-            action: "tts_google_translate",
-            audioBase64: reader.result.split(",")[1],
+        try {
+          const response = await fetch(gtUrl);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const audioBlob = await response.blob();
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            actionApi?.setBadgeText({ text: "", tabId });
+            api.tabs.sendMessage(tabId, {
+              action: "tts_google_translate",
+              audioBase64: reader.result.split(",")[1],
+            });
+          };
+          reader.readAsDataURL(audioBlob);
+        } catch (error) {
+          actionApi?.setBadgeText({ text: "!", tabId });
+          actionApi?.setBadgeBackgroundColor({ color: "#ef4444", tabId });
+          setTimeout(() => actionApi?.setBadgeText({ text: "", tabId }), 2500);
+          api.notifications.create({
+            type: "basic",
+            iconUrl: "icons/icon128.png",
+            title: "TTS Error",
+            message: `Google Translate TTS failed: ${error.message}`,
           });
-        };
-        reader.readAsDataURL(audioBlob);
-      } catch (error) {
-        actionApi?.setBadgeText({ text: "!", tabId });
-        actionApi?.setBadgeBackgroundColor({ color: "#ef4444", tabId });
-        setTimeout(() => actionApi?.setBadgeText({ text: "", tabId }), 2500);
-        api.notifications.create({
-          type: "basic",
-          iconUrl: "icons/icon128.png",
-          title: "TTS Error",
-          message: `Google Translate TTS failed: ${error.message}`,
-        });
+        }
       }
     }
-  });
+  );
 }
 
 // Streaming playback: open a port to the page and feed it PCM chunks, one text
@@ -124,7 +128,14 @@ async function handleTTS(selectedText, segments, tabId) {
 // ahead of the playhead, so abandoning a long article wastes at most one
 // segment instead of the whole thing. lookAhead === 0 means unlimited: fetch
 // every segment back to back, which is the original behaviour.
-async function streamKokoro(segments, voice, tabId, speed = DEFAULT_SPEED, lookAhead = DEFAULT_LOOKAHEAD) {
+async function streamKokoro(
+  segments,
+  voice,
+  tabId,
+  speed = DEFAULT_SPEED,
+  lookAhead = DEFAULT_LOOKAHEAD,
+  autoScroll = DEFAULT_AUTO_SCROLL
+) {
   let port;
   try {
     port = api.tabs.connect(tabId, { name: "tts-stream" });
@@ -159,7 +170,11 @@ async function streamKokoro(segments, voice, tabId, speed = DEFAULT_SPEED, lookA
   });
 
   // The player needs to know whether to ask for more audio, or just wait.
-  try { port.postMessage({ type: "meta", lookAhead }); } catch (e) { return; }
+  try {
+    port.postMessage({ type: "meta", lookAhead, autoScroll });
+  } catch (e) {
+    return;
+  }
 
   actionApi?.setBadgeText({ text: "…", tabId });
   actionApi?.setBadgeBackgroundColor({ color: "#3b82f6", tabId });

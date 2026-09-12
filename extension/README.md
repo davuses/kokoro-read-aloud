@@ -22,7 +22,8 @@ It has two engines:
   (popup button or context menu).
 - **Read from here to the end** — read from the right-clicked spot onward.
 - Streaming player with play/pause, seek, and a WAV download (Kokoro).
-- Sentence-level highlight synced to the audio (Kokoro).
+- Sentence-level highlight synced to the audio, with optional automatic page
+  scrolling that pauses when you manually scroll away (Kokoro).
 
 ## Build
 

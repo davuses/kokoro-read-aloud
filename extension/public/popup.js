@@ -66,6 +66,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     api.storage.sync.set({ ttsLookAhead: Number(lookaheadSelect.value) });
   });
 
+  // Follow the active karaoke sentence as it moves down the page. This is on
+  // by default, but a saved explicit false must not be replaced by the default.
+  const autoScroll = document.getElementById("auto-scroll");
+  api.storage.sync.get("ttsAutoScroll", (data) => {
+    autoScroll.checked = data.ttsAutoScroll ?? DEFAULT_AUTO_SCROLL;
+  });
+  autoScroll.addEventListener("change", () => {
+    api.storage.sync.set({ ttsAutoScroll: autoScroll.checked });
+  });
+
   // Persist the server URL on edit, then re-fetch voices and re-check status
   // against the new address.
   const applyServerUrl = async () => {
@@ -150,6 +160,9 @@ function updateServerStatus() {
   urlRow.style.display = isKokoro ? "block" : "none";
   speedRow.style.display = isKokoro ? "block" : "none";
   document.getElementById("lookahead-row").style.display = isKokoro
+    ? "block"
+    : "none";
+  document.getElementById("auto-scroll-row").style.display = isKokoro
     ? "block"
     : "none";
   if (isKokoro) pingServer(indicator);

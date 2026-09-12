@@ -14,6 +14,11 @@ const DEFAULT_SERVER_URL = "http://localhost:18001";
 // Default playback rate; 1.0 is natural speed.
 const DEFAULT_SPEED = 1.0;
 
+// Keep the sentence being spoken in view unless the user opts out. Manual
+// scrolling suspends following for the current player until playback is
+// explicitly resumed or sought.
+const DEFAULT_AUTO_SCROLL = true;
+
 // Seconds of audio to generate ahead of the playhead. 0 = unlimited: generate
 // the whole text as fast as the server can, which is the long-standing default
 // (instant seeking, download ready immediately) at the cost of wasted compute

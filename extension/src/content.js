@@ -898,9 +898,22 @@ function createStreamingPlayer(port, source) {
 
   const audioCtx = new AudioContext();
 
+  let autoScrollEnabled = true;
+  let autoScrollSuspended = false;
+  let forceAutoScroll = false;
+  let programmaticScrollUntil = 0;
+
+  function markProgrammaticScroll() {
+    // Smooth scrolling emits a series of ordinary scroll events. Keep them
+    // from looking like a manual override while the animation settles.
+    programmaticScrollUntil = performance.now() + 1500;
+  }
+
   // Sentence-level highlighter over the source DOM (null if no source or the
   // CSS Custom Highlight API is unavailable). Audio still plays without it.
-  const karaoke = source ? createKaraoke(source.roots, source.range) : null;
+  const karaoke = source
+    ? createKaraoke(source.roots, source.range, markProgrammaticScroll)
+    : null;
 
   const LOOKAHEAD = 1.0; // seconds of audio scheduled ahead of the playhead
   const chunks = []; // { buffer, start } cumulative timeline
@@ -990,8 +1003,12 @@ function createStreamingPlayer(port, source) {
     }
   }
 
-  function play(fromOffset) {
+  function play(fromOffset, resumeAutoScroll = true) {
     pauseOtherPlayers(self); // taking over playback; quiet the others
+    if (resumeAutoScroll && autoScrollEnabled) {
+      autoScrollSuspended = false;
+      forceAutoScroll = true;
+    }
     stopActiveSources();
     startOffset = Math.max(0, Math.min(fromOffset, totalDuration));
     startCtxTime = audioCtx.currentTime;
@@ -1053,7 +1070,14 @@ function createStreamingPlayer(port, source) {
     if (!progress.isDragging() && totalDuration > 0) {
       progress.setProgress(position() / totalDuration);
     }
-    if (karaoke) karaoke.update(position(), finished);
+    if (karaoke) {
+      karaoke.update(
+        position(),
+        autoScrollEnabled && !autoScrollSuspended,
+        forceAutoScroll
+      );
+      forceAutoScroll = false;
+    }
 
     if (receivedEnd) return;
     const now = Date.now();
@@ -1149,11 +1173,11 @@ function createStreamingPlayer(port, source) {
     if (chunks.length === 1) {
       const otherMedia = Array.from(document.querySelectorAll("audio, video"))
         .some((el) => !el.paused && !el.ended && el.readyState > 2);
-      if (!otherMedia) play(0);
+      if (!otherMedia) play(0, false);
     } else if (buffering) {
       // The audio we were waiting on arrived — resume from where we stalled.
       buffering = false;
-      play(startOffset);
+      play(startOffset, false);
     } else if (isPlaying) {
       pump();
     }
@@ -1182,6 +1206,8 @@ function createStreamingPlayer(port, source) {
       addChunk(msg.sr, new Int16Array(u8.buffer), msg.text);
     } else if (msg.type === "meta") {
       lookAhead = Number(msg.lookAhead) || 0;
+      autoScrollEnabled = msg.autoScroll !== false;
+      if (!autoScrollEnabled) autoScrollSuspended = false;
     } else if (msg.type === "end") {
       onEnd();
     } else if (msg.type === "error") {
@@ -1197,12 +1223,57 @@ function createStreamingPlayer(port, source) {
 
   port.onDisconnect.addListener(() => onEnd());
 
+  // A deliberate user scroll means they want to inspect another part of the
+  // page. Stop pulling the viewport back until they explicitly play, seek, or
+  // use a sentence-skip control. Programmatic smooth scrolling is ignored.
+  const scrollKeys = new Set([
+    "ArrowUp",
+    "ArrowDown",
+    "PageUp",
+    "PageDown",
+    "Home",
+    "End",
+    " ",
+  ]);
+  const suspendAutoScroll = (event) => {
+    if (!event.isTrusted || !autoScrollEnabled) return;
+    autoScrollSuspended = true;
+    forceAutoScroll = false;
+  };
+  const onScroll = (event) => {
+    if (performance.now() <= programmaticScrollUntil) return;
+    suspendAutoScroll(event);
+  };
+  const onScrollKey = (event) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest("input, textarea, select, [contenteditable='true']")
+    ) {
+      return;
+    }
+    if (scrollKeys.has(event.key)) suspendAutoScroll(event);
+  };
+  document.addEventListener("wheel", suspendAutoScroll, {
+    capture: true,
+    passive: true,
+  });
+  document.addEventListener("touchstart", suspendAutoScroll, {
+    capture: true,
+    passive: true,
+  });
+  document.addEventListener("keydown", onScrollKey, true);
+  window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+
   host._cleanup = () => {
     activePlayers.delete(self);
     clearInterval(uiTimer);
     clearInterval(pumpTimer);
     stopActiveSources();
     if (karaoke) karaoke.clear();
+    document.removeEventListener("wheel", suspendAutoScroll, true);
+    document.removeEventListener("touchstart", suspendAutoScroll, true);
+    document.removeEventListener("keydown", onScrollKey, true);
+    window.removeEventListener("scroll", onScroll, true);
     audioCtx.close();
     try { port.disconnect(); } catch (e) { /* already gone */ }
   };
@@ -1218,7 +1289,7 @@ function createStreamingPlayer(port, source) {
 // bounded to within a single chunk. Each sentence's words are matched (forward,
 // normalized to letters/digits so whitespace and punctuation differences don't
 // matter) against a token index of the source's text nodes to build its range.
-function createKaraoke(roots, range) {
+function createKaraoke(roots, range, onAutoScroll = () => {}) {
   roots = (roots || []).filter(Boolean);
   if (
     typeof CSS === "undefined" ||
@@ -1294,6 +1365,38 @@ function createKaraoke(roots, range) {
   const segments = []; // { tStart, tEnd, range } ordered by time
   let currentSeg = null;
 
+  function scrollRangeIntoView(range) {
+    if (!range.startContainer?.isConnected) return;
+    const rects = Array.from(range.getClientRects()).filter(
+      (rect) => rect.width > 0 && rect.height > 0
+    );
+    if (!rects.length) return;
+
+    const first = rects[0];
+    const last = rects[rects.length - 1];
+    const viewportHeight =
+      document.documentElement.clientHeight || window.innerHeight;
+    if (!viewportHeight) return;
+
+    // Leave room around the active sentence so following feels steady and the
+    // fixed player at the bottom does not cover the text. Do nothing while the
+    // whole sentence remains inside this reading area.
+    const comfortableTop = viewportHeight * 0.2;
+    const comfortableBottom = viewportHeight * 0.78;
+    if (first.top >= comfortableTop && last.bottom <= comfortableBottom) return;
+
+    const delta = first.top - viewportHeight * 0.35;
+    if (Math.abs(delta) < 2) return;
+    onAutoScroll();
+    const reduceMotion = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)"
+    ).matches;
+    window.scrollBy({
+      top: delta,
+      behavior: reduceMotion ? "auto" : "smooth",
+    });
+  }
+
   return {
     addChunk(tStart, duration, text) {
       const sentences = splitSentences(text);
@@ -1307,7 +1410,7 @@ function createKaraoke(roots, range) {
         segments.push({ tStart: segStart, tEnd: segEnd, range: rangeForWords(words) });
       }
     },
-    update(pos) {
+    update(pos, autoScroll = false, forceScroll = false) {
       let seg = null;
       for (const s of segments) {
         if (pos >= s.tStart && pos < s.tEnd) {
@@ -1315,10 +1418,14 @@ function createKaraoke(roots, range) {
           break;
         }
       }
-      if (seg === currentSeg) return;
-      currentSeg = seg;
-      highlight.clear();
-      if (seg && seg.range) highlight.add(seg.range);
+      const changed = seg !== currentSeg;
+      if (!changed && !forceScroll) return;
+      if (changed) {
+        currentSeg = seg;
+        highlight.clear();
+        if (seg && seg.range) highlight.add(seg.range);
+      }
+      if (autoScroll && seg?.range) scrollRangeIntoView(seg.range);
     },
     // Time offset to jump to for "previous sentence": restart the current
     // sentence if we're well into it (audiobook convention), otherwise the one
