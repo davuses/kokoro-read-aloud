@@ -48,7 +48,27 @@ jobs:
 
       - name: Attach to GitHub Release (tag pushes)
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: server/installer/Output/*.exe
-          fail_on_unmatched_files: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The extension workflow owns release creation. Waiting here avoids
+          # both workflows racing to create/finalize a release for the same tag.
+          $tag = "${{ github.ref_name }}"
+          $releaseReady = $false
+          for ($attempt = 1; $attempt -le 30; $attempt++) {
+            gh release view $tag --repo "${{ github.repository }}" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $releaseReady = $true
+              break
+            }
+            Write-Host "Waiting for release $tag ($attempt/30)..."
+            Start-Sleep -Seconds 5
+          }
+          if (-not $releaseReady) {
+            throw "Release $tag was not created by the extension workflow"
+          }
+          gh release upload $tag `
+            "server/installer/Output/kokoro-tts-server-setup.exe" `
+            --repo "${{ github.repository }}" `
+            --clobber
